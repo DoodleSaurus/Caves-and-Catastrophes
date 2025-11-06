@@ -125,7 +125,7 @@ set /a "story_index=story_counter / 5"  :: Slower story rotation
 if !story_index! gtr 14 set /a "story_index=14"
 
 :: Move cursor to update positions only (no cls)
-<nul set /p "=    !frames:~%frame_index%,1! Compiling... [Stage: !counter!/1-100]"
+<nul set /p "=    !frames:~%frame_index%,1! Compiling... [Stage: !counter!/100]"
 echo.
 <nul set /p "=STORY: !story[%story_index%]!"
 echo.
