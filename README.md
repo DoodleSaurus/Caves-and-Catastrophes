@@ -1,89 +1,111 @@
 # Caves & Catastrophes
 
-Overview
---------
-Caves & Catastrophes is a small text-based roguelike adventure written in C. The core experience is driven by procedural/random generation — every playthrough is different. You control a hero who explores forests and multi-level cave systems, fights enemies and bosses, collects treasure, completes quests, levels up and upgrades gear.
+A compact, keyboard-driven roguelike written in C. Explore procedurally generated forests, multi-level caves and multi-dimensional realms; fight monsters and bosses, collect loot, craft weapons, complete quests and level up.
 
-Key feature: EVERYTHING is randomly (procedurally) generated — including cave maps, weapons, enemies, NPCs, events, boss encounters, and many stats — for high replayability.
+This project began because I was bored during programming class — a blank file and some RNG experiments turned into this little chaotic adventure.
 
-What is procedurally generated
-------------------------------
-The game uses RNG to create most content on the fly. Examples:
-- Cave maps and room contents: room positions, stairs, exits, monsters, merchants, NPCs, treasures and bosses are placed randomly per run.
-- Weapons: names, attack, level requirement, durability and value are randomly generated.
-- Enemies and bosses: types, health, attack, defense, rewards and occasional "champion" variants are randomized and scaled with depth.
-- NPCs and dialog: types, dialogue options and the occasional gift or quest are chosen randomly.
-- Random events: wandering merchant, mysterious stranger gifts, ambushes, lucky finds and fountains are chosen by chance during exploration.
-- Encounters & stats: encounter frequency, combat outcomes, and many numeric values are randomized and scaled by player level and cave depth.
+---
 
-How to play
------------
-The game runs in a terminal/console. It's keyboard-driven and intentionally simple to make the procedural systems shine.
+## Table of contents
+- [Quick summary](#quick-summary)  
+- [What the game contains](#what-the-game-contains)  
+- [Key feature — Procedural generation](#key-feature---procedural-generation)  
+- [How to play (quick)](#how-to-play-quick)  
+- [Build & run (quick start)](#build--run-quick-start)  
+- [If you don't want to compile](#if-you-dont-want-to-compile)  
+- [Troubleshooting & notes](#troubleshooting--notes)  
+- [Developer notes & extending](#developer-notes--extending)  
+- [Contributing](#contributing)  
+- [License & credits](#license--credits)  
+- [Future updates](#future-updates)
 
-Main menu:
-- 1 — Start New Game
-- 2 — Help & Guide
-- 3 — Credits
-- 4 — Load Game
-- Q — Quit
+---
 
-In-game (main actions):
-- 1 — Explore the forest (random encounters)
-- 2 — Enter the cave system (procedural dungeon with multiple depths)
-- 3 — Rest and recover (risk: ambush)
-- 4 — Check inventory (equip/use potions & scrolls)
-- 5 — View quests
-- 6 — Skill tree (spend skill points)
-- 7 — Visit town (NPCs, shop, crafting)
-- 8 — Save game
-- 9 — Exit to main menu
+## Quick summary
+- Platform: console / terminal (Windows-first; POSIX supported with a small shim)  
+- Source: `main.c` (single-file C program)  
+- Play style: keyboard-only, single-key prompts (no Enter needed for many choices).  
+- One-liner: Explore procedural caves & realms, fight, loot, craft, quest, survive.
 
-Cave navigation (when inside the caves):
-- W — Move North
-- S — Move South
-- A — Move West
-- D — Move East
-- Ctrl+X (char code 24) — Descend stairs (when present)
-- Ctrl+Y (char code 25) — Ascend stairs (when present)
-- M — Show map
-- I — Inventory
-- R — Rest (heal but risk ambush)
-- X — Escape the cave system (only on exit room)
-- Q — Quit cave and return to entrance
+---
 
-Combat:
-- 1 — Attack
-- 2 — Defend
-- 3 — Special Attack (costs mana)
-- 4 — Use Potion
-- 5 — Flee (chance dependent on depth and encounter type)
+## What the game contains
+- Multi-depth cave system (5 levels; each level is a 5×5 grid)
+  - Stairs up/down, merchants, NPCs, treasure rooms, enemy rooms and bosses
+  - Final exit portal on deepest level with special rewards
+- Multi-dimensional realms (Fire, Ice, Shadow) — each is a 4×4 grid
+  - Realm-specific enemies, treasures, a guaranteed realm boss and permanent rewards
+- Turn-based combat (attack, defend, special attack, potions, flee)
+- Inventory: weapons, potions, magic scrolls
+- Shops (town & wandering cave merchants) and crafting station (recipes included)
+- Quest system and NPC interactions
+- Save system: quick save, multiple slots, autosave and backup saves
+- UX: ASCII headers, boxed messages, typewriter-style text for flavor
 
-Tips
-- Save often.
-- Explore thoroughly to increase rewards, but deeper levels are significantly harder.
-- Manage health, mana and potions before diving deeper.
-- Use town shops and crafting to prepare for boss fights.
+---
 
-How to open, build and run
---------------------------
+## Key feature — Procedural generation
+Everything is generated by RNG at runtime for replayability. Examples:
+- Cave maps & room contents: stairs, exits, monsters, merchants, NPCs, treasures, bosses
+- Weapons: generated names, attack, level, durability and value
+- Enemies & bosses: randomized stats, champion variants, rewards scaled by depth
+- NPCs & dialog: selection of types, lines and occasional gifts/quests
+- Random events: wandering merchants, ambushes, lucky finds, fountains
+- Encounters & numeric values are scaled by player level and location
 
-1) Open the source
-- The main source file is `dungeon.c`. Open with any editor (VS Code, Vim, Sublime, Notepad++, etc.) or an IDE (Visual Studio, CLion).
+---
 
-2) Build on Windows
-- The code uses `<conio.h>` and `_getch()` so it compiles & runs on Windows toolchains easily.
+## How to play (quick)
+Main menu
+- `1` — Start New Game  
+- `2` — Help & Guide  
+- `3` — Credits  
+- `4` — Load Game  
+- `Q` — Quit
 
-Using MinGW (MSYS2 / MinGW-w64):
+In-game (main actions)
+- `1` — Explore the forest (random encounters)  
+- `2` — Enter the cave system (procedural dungeon)  
+- `3` — Rest and recover (risk: ambush)  
+- `4` — Check inventory (equip/use potions & scrolls)  
+- `5` — View quests  
+- `6` — Skill tree (spend skill points)  
+- `7` — Visit town (NPCs, shop, crafting)  
+- `8` — Save/Load Game  
+- `9` — Exit to main menu
+
+Cave navigation (while exploring)
+- `W` — North, `S` — South, `A` — West, `D` — East  
+- `J` — Descend stairs (when present)  
+- `U` — Ascend stairs (when present)  
+- `M` — Show map, `I` — Inventory  
+- `R` — Rest (heal but risk ambush)  
+- `X` — Escape (only on deepest-level exit room)  
+- `Q` — Quit cave (return to entrance)
+
+Combat
+- `1` — Attack  
+- `2` — Defend  
+- `3` — Special Attack (uses mana)  
+- `4` — Use Potion  
+- `5` — Flee (chance varies with depth / enemy)
+
+> Note: the code historically referenced Ctrl+X / Ctrl+Y (control codes 24/25) for stairs — terminal handling varies. J/U are the reliable keys used in the current implementation.
+
+---
+
+## Build & run — quick start
+
+### Windows (recommended)
+- Using MinGW / MSYS2 / MinGW-w64:
 ```bash
-gcc dungeon.c -o dungeon.exe -std=c99
-./dungeon.exe
+gcc main.c -o CAVES_AND_CATASTROPHES.exe -std=c99 -O2 -Wall
+./CAVES_AND_CATASTROPHES.exe
 ```
+- Visual Studio: add `main.c` to a Console Application project and build.
 
-Using Visual Studio:
-- Create a new Console Application (or add `dungeon.c` to an existing project), build and run.
-
-3) Build on Linux / macOS (POSIX)
-- The code includes some Windows-only headers. To run on POSIX, add a small compatibility layer that implements `_getch()` using termios. Insert this snippet in `dungeon.c` (replace the unconditional `#include <conio.h>` or add after includes when not _WIN32):
+### POSIX (Linux / macOS)
+POSIX lacks `<conio.h>`. Add this `_getch()` shim to `main.c` (guarded with `#ifndef _WIN32`):
 
 ```c
 #ifndef _WIN32
@@ -103,40 +125,65 @@ static int _getch(void) {
 #endif
 ```
 
-Then compile:
+Then:
 ```bash
-gcc dungeon.c -o dungeon -std=c99
-./dungeon
+gcc main.c -o caves_and_catastrophes -std=c99 -O2 -Wall
+./caves_and_catastrophes
 ```
 
-Notes:
-- The compatibility snippet approximates `_getch()` behaviour (single-key reads without Enter).
-- Special key handling (Ctrl+X / Ctrl+Y) is implemented via their control-character codes (24 and 25) in the program; terminal behaviour may vary. If those keys don't behave as expected on your terminal, use the directional keys (W/A/S/D) and the map/exit commands.
-- The code already uses `#ifdef _WIN32` guards for Sleep/usleep differences.
+---
 
-Troubleshooting
----------------
-- Missing `conio.h` on Linux/macOS: add the compatibility `_getch()` snippet above.
-- Save file `savegame.dat` not found when loading: start a new game and save, or delete a corrupted save file and start anew.
-- Terminal echo/line buffering: if input appears echoed or buffered, ensure the compatibility snippet is present for POSIX builds.
-- If compilation fails referencing Windows-only headers, compile on Windows or conditionally exclude Windows-only includes as shown above.
+## If you don't want to compile (or you're lazy)
+If you lack programming experience or just don't want to bother manually compiling, run the included Windows helper:
+- `autoCompile.bat` — double-click it or run it in a Command Prompt. It will attempt to compile `main.c` with GCC and produce `CAVES_AND_CATASTROPHES.exe` and log output to `compile.log`. The script will also try to embed `img\logo\logo.ico` if present.
 
-Design & Extensibility notes
----------------------------
-- The project is intentionally modular: cave generation, combat, inventory, quests, NPCs, shops and crafting are in clearly separated functions. Look for:
-  - caveWanderingSystem, generateCave, displayCaveMap
-  - generate_weapon, initShop, visitShop
-  - caveEncounterEnemy, bossBattle, spawnDepthBoss
-  - initQuests, updateQuestProgress, checkQuestCompletion
-  - initSkills, unlockSkill
-- To extend or port:
-  - Replace the input layer with ncurses or a GUI for richer controls.
-  - Add persistence formats (JSON saves) to make debugging saves easier.
-  - Expand procedural systems (more prefixes/suffixes for weapons, more enemy types, special room effects).
+---
 
-Credits & License
------------------
-- Developed by Carl Harvey Miguel (DoodleSaurus)
-- This is a small hobby project. See repository for license (if not present, assume permissive use with attribution — contact the author for clarifications).
+## Troubleshooting & notes
+- Missing `conio.h` on POSIX: add the `_getch()` shim shown above.  
+- `autoCompile.bat` fails: likely GCC/MinGW missing — install MSYS2 / MinGW-w64 or compile manually. Check `compile.log` for details.  
+- Save compatibility: saves are binary and tied to `main.c` struct layout — changing structures can invalidate old saves.  
+- Control characters: terminal behavior for control codes (Ctrl+X/Ctrl+Y) varies — use J/U where available.  
+- If single-key input echoes on POSIX, confirm the `_getch()` shim is compiled.
+
+---
+
+## Developer notes & where to look in `main.c`
+`main.c` is organized by subsystem functions. Useful entry points:
+- Cave system: `caveWanderingSystem`, `generateCave`, `displayCaveMap`  
+- Realms: `initRealms`, `generateRealm`, `realmWanderingSystem`, `spawnRealmEnemy`  
+- Combat: `caveEncounterEnemy`, `bossBattle`, `spawnBoss`, `spawnDepthBoss`  
+- Items & shops: `generate_weapon`, `initShop`, `visitShop`  
+- Crafting: `initCrafting`, `craftingSystem`  
+- Quests & progression: `initQuests`, `updateQuestProgress`, `checkQuestCompletion`  
+- Saving: `saveGame`, `loadGame`, `saveGameToSlot`, `loadGameFromSlot`, `autoSaveGame`
+
+---
+
+## Extending ideas
+- Port input to `ncurses` or a GUI for consistent terminal behavior.  
+- Add JSON/text saves for portability and easier debugging.  
+- Expand procedural pools: more prefixes, suffixes, enemy types, special room effects.  
+- Refactor `main.c` into modules (`cave.c`, `combat.c`, `save.c`, `ui.c`) for maintainability.
+
+---
+
+## Contributing
+This is a hobby project. Contributions welcome:
+- Fork, implement focused changes (bugfixes, portability, new content), and open a pull request.  
+- If you change save formats or core structures, document migrations in the PR.
+
+---
+
+## License & credits
+- Developed by Carl Harvey Miguel (DoodleSaurus)  
+- License: Creative Commons Attribution‑NoDerivatives 4.0 International (CC BY‑ND 4.0). See `LICENSE` for details.
+
+---
+
+## Future updates
+This project is actively maintained and will continue to receive updates — expect new weapons, enemies, rooms, quests, quality-of-life improvements and other features in future releases.
+
+---
 
 Enjoy the unpredictable — every delve is a new story.
