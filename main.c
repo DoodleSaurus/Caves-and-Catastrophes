@@ -11,6 +11,7 @@
 #include <unistd.h>
 #endif
 #include <string.h>
+#include <stdarg.h>
 
 #define MAX_INVENTORY 10
 #define MAX_QUESTS 5
@@ -21,8 +22,9 @@
 #define CAVE_HEIGHT 5
 #define MAX_CAVE_ROOMS 25
 #define MAX_CAVE_DEPTH 5
-
-int i = 0;
+#define MAX_REALMS 3
+#define REALM_WIDTH 4
+#define REALM_HEIGHT 4
 
 typedef struct {
     char name[50];
@@ -127,6 +129,43 @@ typedef struct {
     char description[100];
 } cave_room;
 
+typedef struct {
+    char name[50];
+    char description[100];
+    char enemy_prefix[20];
+    int base_health_bonus;
+    int base_attack_bonus;
+    int gold_multiplier;
+    int exp_multiplier;
+    bool unlocked;
+    char special_effect[100];
+} realm;
+
+typedef struct {
+    int x, y;
+    bool visited;
+    bool has_enemy;
+    bool has_treasure;
+    bool has_boss;
+    bool is_exit;
+    char description[100];
+    char realm_specific_desc[100];
+} realm_room;
+
+typedef struct {
+    player p;
+    inventory inv;
+    quest quests[MAX_QUESTS];
+    skill skills[MAX_SKILLS];
+    npc npcs[MAX_NPCS];
+    shop game_shop;
+    recipe recipes[MAX_RECIPES];
+    realm realms[MAX_REALMS];
+    int quest_count;
+    time_t save_time;
+    char save_name[50];
+} game_state;
+
 // Function declarations
 void splashStart(void);
 void splashEnd(void);
@@ -151,7 +190,7 @@ void encounterEnemy(player *p);
 void findTreasure(player *p);
 void restArea(player *p);
 void caveNavigation(player *p);
-void printHeader(const char *title);
+void printHeader(const char *fmt, ...);
 void printSeparator(void);
 void printBox(const char *text);
 
@@ -191,6 +230,21 @@ void caveEncounterNPC(player *p, inventory *inv, quest *quests, int *quest_count
 void caveEncounterBoss(player *p, inventory *inv, int depth_level);
 void spawnDepthBoss(player *p, enemy *boss, int depth_level);
 
+// Multi-dimensional Realm System
+void initRealms(realm *realms);
+void unlockRealms(player *p, realm *realms);
+void showRealms(player *p, realm *realms);
+void enterRealm(player *p, inventory *inv, realm *realms, int realm_index);
+void generateRealm(realm_room realm_map[REALM_HEIGHT][REALM_WIDTH], realm *current_realm, player *p);
+void displayRealmMap(realm_room realm_map[REALM_HEIGHT][REALM_WIDTH], int player_x, int player_y, realm *current_realm);
+void realmWanderingSystem(player *p, inventory *inv, realm *current_realm);
+void handleRealmRoomEvent(player *p, inventory *inv, realm_room *room, realm *current_realm);
+void spawnRealmEnemy(player *p, enemy *e, realm *current_realm);
+void realmFindTreasure(player *p, inventory *inv, realm *current_realm);
+void spawnRealmBoss(player *p, enemy *boss, realm *current_realm);
+void realmEncounterBoss(player *p, inventory *inv, realm *current_realm);
+void generateRealmWeapon(weapon *w, realm *current_realm, player *p);
+
 // Skill effects
 void skill_warrior_strength(player *p);
 void skill_rogue_agility(player *p);
@@ -200,6 +254,14 @@ void skill_health_boost(player *p);
 void skill_mana_flow(player *p);
 void skill_lucky_find(player *p);
 void skill_boss_slayer(player *p);
+
+// Enhanced save/load system
+bool saveGameToSlot(player *p, inventory *inv, quest *quests, int quest_count, int slot);
+bool loadGameFromSlot(player *p, inventory *inv, quest *quests, int *quest_count, int slot);
+bool loadAutoSave(player *p, inventory *inv, quest *quests, int *quest_count);
+bool autoSaveGame(player *p, inventory *inv, quest *quests, int quest_count);
+void saveLoadMenu(player *p, inventory *inv, quest *quests, int quest_count);
+void checkAutoSave(player *p, inventory *inv, quest *quests, int quest_count, int *save_counter);
 
 int main() {
     int c;
@@ -238,14 +300,42 @@ int main() {
                     quest quests[MAX_QUESTS];
                     int quest_count = 0;
                     
-                    if (loadGame(&p, &inv, quests, &quest_count)) {
+                    clearScreen();
+                    printHeader("LOAD GAME");
+                    printf("1. Load from Slot 0 (Quick Save)\n");
+                    printf("2. Load from Slot 1\n");
+                    printf("3. Load from Slot 2\n");
+                    printf("4. Load from Slot 3\n");
+                    printf("5. Load Auto-Save\n");
+                    printf("B. Back to Main Menu\n");
+                    printSeparator();
+                    printf("Choice: ");
+                    
+                    char load_choice = _getch();
+                    printf("\n");
+                    clearScreen();
+                    
+                    bool loaded = false;
+                    switch (load_choice) {
+                        case '1': loaded = loadGameFromSlot(&p, &inv, quests, &quest_count, 0); break;
+                        case '2': loaded = loadGameFromSlot(&p, &inv, quests, &quest_count, 1); break;
+                        case '3': loaded = loadGameFromSlot(&p, &inv, quests, &quest_count, 2); break;
+                        case '4': loaded = loadGameFromSlot(&p, &inv, quests, &quest_count, 3); break;
+                        case '5': loaded = loadAutoSave(&p, &inv, quests, &quest_count); break;
+                        case 'b': case 'B': break;
+                        default: printf("Invalid choice!\n"); break;
+                    }
+                    
+                    if (loaded) {
                         printBox("GAME LOADED SUCCESSFULLY");
                         printf("Welcome back, %s!\n", p.name);
+                        printf("Level: %d | Gold: %d | Health: %d/%d\n", 
+                            p.level, p.gold, p.health, p.max_health);
                         printf("\nPress any key to continue...\n");
                         _getch();
                         clearScreen();
                         start(&p);
-                    } else {
+                    } else if (load_choice >= '1' && load_choice <= '5') {
                         printBox("NO SAVE GAME FOUND");
                         printf("Start a new game first!\n");
                         printf("\nPress any key to continue...\n");
@@ -264,10 +354,16 @@ int main() {
     return 0;
 }
 
-void printHeader(const char *title) {
+void printHeader(const char *fmt, ...) {
+    char title[200];
+    va_list args;
+    va_start(args, fmt);
+    vsnprintf(title, sizeof(title), fmt, args);
+    va_end(args);
+
     int len = strlen(title);
     int width = len + 8;
-    
+
     printf("\n");
     for (int i = 0; i < width; i++) printf("=");
     printf("\n");
@@ -275,6 +371,7 @@ void printHeader(const char *title) {
     for (int i = 0; i < width; i++) printf("=");
     printf("\n\n");
 }
+
 
 void printSeparator(void) {
     printf("\n");
@@ -337,6 +434,7 @@ void start(player *p) {
     shop game_shop;
     recipe recipes[MAX_RECIPES];
     int quest_count = 0;
+    int auto_save_counter = 0;
     
     // Load game data
     if (!loadGame(p, &inv, quests, &quest_count)) {
@@ -385,7 +483,7 @@ void start(player *p) {
         printf("5. View quests\n");
         printf("6. Skill tree\n");
         printf("7. Visit town\n");
-        printf("8. Save game\n");
+        printf("8. Save/Load Game\n"); 
         printf("9. Exit to main menu\n");
         printSeparator();
         printf("Choice: ");
@@ -424,12 +522,8 @@ void start(player *p) {
             case '7':
                 visitTown(p, &inv, quests, &quest_count, npcs, &game_shop, recipes);
                 break;
-            case '8':
-                if (saveGame(p, &inv, quests, quest_count)) {
-                    printBox("GAME SAVED SUCCESSFULLY");
-                }
-                printf("\nPress any key to continue...\n");
-                _getch();
+            case '8':  
+                saveLoadMenu(p, &inv, quests, quest_count);
                 break;
             case '9':
                 printf("\nReturning to main menu...\n");
@@ -438,6 +532,7 @@ void start(player *p) {
                 #else
                     usleep(2000 * 1000);
                 #endif
+                clearScreen();
                 return;
             default:
                 printf("\nInvalid choice!\n");
@@ -455,12 +550,675 @@ void start(player *p) {
             triggerRandomEvent(p, &inv);
         }
         
+        // Auto-save check
+        checkAutoSave(p, &inv, quests, quest_count, &auto_save_counter);
+        
         // Check if player died
         if (p->health <= 0) {
             printf("\nYou have been defeated! Game over...\n");
             printf("Press any key to continue...\n");
             _getch();
             return;
+        }
+    }
+}
+
+// ==================== MULTI-DIMENSIONAL REALM ====================
+
+void initRealms(realm *realms) {
+    // Fire Realm
+    strcpy(realms[0].name, "Fire Realm");
+    strcpy(realms[0].description, "A volcanic landscape filled with lava and fire creatures");
+    strcpy(realms[0].enemy_prefix, "Fire");
+    realms[0].base_health_bonus = -10;  // Enemies have less health but more attack
+    realms[0].base_attack_bonus = 8;
+    realms[0].gold_multiplier = 120;    // 20% more gold
+    realms[0].exp_multiplier = 120;     // 20% more experience
+    realms[0].unlocked = false;
+    strcpy(realms[0].special_effect, "Fire weapons have chance to burn enemies");
+    
+    // Ice Realm
+    strcpy(realms[1].name, "Ice Realm");
+    strcpy(realms[1].description, "Frozen tundra with icy creatures and blizzards");
+    strcpy(realms[1].enemy_prefix, "Ice");
+    realms[1].base_health_bonus = 15;   // Enemies have more health
+    realms[1].base_attack_bonus = 2;
+    realms[1].gold_multiplier = 110;    // 10% more gold
+    realms[1].exp_multiplier = 110;     // 10% more experience
+    realms[1].unlocked = false;
+    strcpy(realms[1].special_effect, "Ice weapons can slow enemies");
+    
+    // Shadow Realm
+    strcpy(realms[2].name, "Shadow Realm");
+    strcpy(realms[2].description, "Dark dimension where stealth and evasion reign");
+    strcpy(realms[2].enemy_prefix, "Shadow");
+    realms[2].base_health_bonus = 0;
+    realms[2].base_attack_bonus = 5;
+    realms[2].gold_multiplier = 150;    // 50% more gold
+    realms[2].exp_multiplier = 130;     // 30% more experience
+    realms[2].unlocked = false;
+    strcpy(realms[2].special_effect, "Shadow weapons have high critical chance");
+}
+
+void unlockRealms(player *p, realm *realms) {
+    // Unlock realms based on player progression
+    if (p->level >= 5) {
+        realms[0].unlocked = true;  // Fire Realm at level 5
+    }
+    if (p->level >= 8) {
+        realms[1].unlocked = true;  // Ice Realm at level 8
+    }
+    if (p->deepest_cave_level >= 3) {
+        realms[2].unlocked = true;  // Shadow Realm after reaching cave depth 3
+    }
+}
+
+void showRealms(player *p, realm *realms) {
+    clearScreen();
+    printHeader("MULTI-DIMENSIONAL PORTAL");
+    printf("Ancient portals to other realms have opened!\n\n");
+    
+    for (int i = 0; i < MAX_REALMS; i++) {
+        printf("%d. %s\n", i+1, realms[i].name);
+        printf("   %s\n", realms[i].description);
+        printf("   Special: %s\n", realms[i].special_effect);
+        printf("   Rewards: %d%% Gold, %d%% EXP\n", realms[i].gold_multiplier, realms[i].exp_multiplier);
+        
+        if (realms[i].unlocked) {
+            printf("   Status: UNLOCKED - Enter to explore!\n");
+        } else {
+            printf("   Status: LOCKED - ");
+            if (i == 0) printf("Reach Level 5 to unlock\n");
+            else if (i == 1) printf("Reach Level 8 to unlock\n");
+            else if (i == 2) printf("Reach Cave Depth 3 to unlock\n");
+        }
+        printSeparator();
+    }
+    
+    if (p->level >= 5) {
+        printf("Enter which realm? (1-%d) or Back (b): ", MAX_REALMS);
+        char choice = _getch();
+        printf("\n");
+        
+        if (choice >= '1' && choice <= '3') {
+            int index = choice - '1';
+            if (realms[index].unlocked) {
+                enterRealm(p, NULL, realms, index);
+            } else {
+                printf("This realm is still locked!\n");
+                printf("Press any key to continue...\n");
+                _getch();
+            }
+        }
+    } else {
+        printf("You need to reach Level 5 to access the realms!\n");
+        printf("Press any key to continue...\n");
+        _getch();
+    }
+}
+
+void enterRealm(player *p, inventory *inv, realm *realms, int realm_index) {
+    clearScreen();
+    printHeader("ENTERING THE %s", realms[realm_index].name);
+    
+    typewrite("The portal swirls with cosmic energy...", 50);
+    printf("\n");
+    #ifdef _WIN32
+        Sleep(2000);
+    #else
+        usleep(2000 * 1000);
+    #endif
+    
+    printf("You step through into %s!\n", realms[realm_index].description);
+    printf("The very air feels different here...\n");
+    
+    #ifdef _WIN32
+        Sleep(3000);
+    #else
+        usleep(3000 * 1000);
+    #endif
+    
+    realmWanderingSystem(p, inv, &realms[realm_index]);
+}
+
+void generateRealm(realm_room realm_map[REALM_HEIGHT][REALM_WIDTH], realm *current_realm, player *p) {
+    // Initialize all rooms
+    for (int y = 0; y < REALM_HEIGHT; y++) {
+        for (int x = 0; x < REALM_WIDTH; x++) {
+            realm_map[y][x].x = x;
+            realm_map[y][x].y = y;
+            realm_map[y][x].visited = false;
+            realm_map[y][x].has_enemy = false;
+            realm_map[y][x].has_treasure = false;
+            realm_map[y][x].has_boss = false;
+            realm_map[y][x].is_exit = false;
+            
+            // Realm-specific descriptions
+            if (strcmp(current_realm->name, "Fire Realm") == 0) {
+                const char *fire_descs[] = {
+                    "Molten rock bubbles beneath your feet",
+                    "The air shimmers with intense heat",
+                    "Volcanic vents spew ash and embers",
+                    "Charred remains litter the landscape"
+                };
+                strcpy(realm_map[y][x].description, fire_descs[random_range(0, 3)]);
+            } else if (strcmp(current_realm->name, "Ice Realm") == 0) {
+                const char *ice_descs[] = {
+                    "Frost covers every surface",
+                    "Howling winds whip snow around you",
+                    "Ice formations glitter in the dim light",
+                    "The ground crunches with each step"
+                };
+                strcpy(realm_map[y][x].description, ice_descs[random_range(0, 3)]);
+            } else if (strcmp(current_realm->name, "Shadow Realm") == 0) {
+                const char *shadow_descs[] = {
+                    "Shadows twist and writhe unnaturally",
+                    "Whispers echo from the darkness",
+                    "The very light seems to be absorbed",
+                    "Your senses feel dulled and muted"
+                };
+                strcpy(realm_map[y][x].description, shadow_descs[random_range(0, 3)]);
+            }
+        }
+    }
+    
+    // Set entrance
+    int start_x = REALM_WIDTH / 2;
+    int start_y = REALM_HEIGHT / 2;
+    realm_map[start_y][start_x].visited = true;
+    strcpy(realm_map[start_y][start_x].description, "The dimensional portal shimmers behind you");
+    
+    // Set exit
+    int exit_x, exit_y;
+    do {
+        exit_x = random_range(0, REALM_WIDTH - 1);
+        exit_y = random_range(0, REALM_HEIGHT - 1);
+    } while (exit_x == start_x && exit_y == start_y);
+    
+    realm_map[exit_y][exit_x].is_exit = true;
+    strcpy(realm_map[exit_y][exit_x].description, "The return portal glows invitingly");
+    
+    // Place enemies (more common in realms)
+    for (int y = 0; y < REALM_HEIGHT; y++) {
+        for (int x = 0; x < REALM_WIDTH; x++) {
+            if (!realm_map[y][x].is_exit && (x != start_x || y != start_y) && 
+                random_range(1, 100) <= 60) {
+                realm_map[y][x].has_enemy = true;
+            }
+        }
+    }
+    
+    // Place treasure
+    for (int y = 0; y < REALM_HEIGHT; y++) {
+        for (int x = 0; x < REALM_WIDTH; x++) {
+            if (!realm_map[y][x].has_enemy && !realm_map[y][x].is_exit && 
+                (x != start_x || y != start_y) && random_range(1, 100) <= 40) {
+                realm_map[y][x].has_treasure = true;
+            }
+        }
+    }
+    
+    // Place boss (guaranteed in one room)
+    bool boss_placed = false;
+    int attempts = 0;
+    while (!boss_placed && attempts < 20) {
+        int x = random_range(0, REALM_WIDTH - 1);
+        int y = random_range(0, REALM_HEIGHT - 1);
+        int distance = abs(x - start_x) + abs(y - start_y);
+        if (distance >= 2 && !realm_map[y][x].has_enemy && !realm_map[y][x].has_treasure && 
+            !realm_map[y][x].is_exit) {
+            realm_map[y][x].has_boss = true;
+            boss_placed = true;
+        }
+        attempts++;
+    }
+}
+
+void displayRealmMap(realm_room realm_map[REALM_HEIGHT][REALM_WIDTH], int player_x, int player_y, realm *current_realm) {
+    printf("\n");
+    printf("    ");
+    for (int x = 0; x < REALM_WIDTH; x++) {
+        printf(" %d  ", x);
+    }
+    printf("\n");
+    
+    for (int y = 0; y < REALM_HEIGHT; y++) {
+        printf(" %d |", y);
+        for (int x = 0; x < REALM_WIDTH; x++) {
+            if (x == player_x && y == player_y) {
+                printf(" P ");
+            } else if (realm_map[y][x].visited) {
+                if (realm_map[y][x].is_exit) {
+                    printf(" E ");
+                } else if (realm_map[y][x].has_boss) {
+                    printf(" B ");
+                } else if (realm_map[y][x].has_enemy) {
+                    printf(" M ");
+                } else if (realm_map[y][x].has_treasure) {
+                    printf(" T ");
+                } else {
+                    printf(" . ");
+                }
+            } else {
+                printf(" ? ");
+            }
+            printf("|");
+        }
+        printf("\n");
+    }
+    
+    printf("\nREALM: %s\n", current_realm->name);
+    printf("MAP LEGEND:\n");
+    printf("P = Your Position | E = Exit Portal | B = Realm Boss\n");
+    printf("M = Monster | T = Treasure | . = Empty | ? = Unexplored\n");
+}
+
+void realmWanderingSystem(player *p, inventory *inv, realm *current_realm) {
+    realm_room realm_map[REALM_HEIGHT][REALM_WIDTH];
+    
+    generateRealm(realm_map, current_realm, p);
+    
+    int player_x = REALM_WIDTH / 2;
+    int player_y = REALM_HEIGHT / 2;
+    bool in_realm = true;
+    int rooms_explored = 0;
+    
+    while (in_realm && p->health > 0) {
+        clearScreen();
+        printHeader("EXPLORING THE %s", current_realm->name);
+        
+        printf("Position: Room (%d, %d)\n", player_x, player_y);
+        printf("Description: %s\n\n", realm_map[player_y][player_x].description);
+        
+        displayRealmMap(realm_map, player_x, player_y, current_realm);
+        
+        printf("\nAvailable Directions:\n");
+        if (player_y > 0) printf("W - Go North\n");
+        if (player_y < REALM_HEIGHT - 1) printf("S - Go South\n");
+        if (player_x > 0) printf("A - Go West\n");
+        if (player_x < REALM_WIDTH - 1) printf("D - Go East\n");
+        printf("M - Show Map\n");
+        printf("I - Check Inventory\n");
+        if (realm_map[player_y][player_x].is_exit)
+            printf("X - Return to Town\n");
+        printf("Q - Emergency Portal Out\n");
+        
+        printSeparator();
+        printf("Choice: ");
+        
+        char choice = _getch();
+        printf("\n");
+        
+        int new_x = player_x;
+        int new_y = player_y;
+        
+        switch (choice) {
+            case 'w': case 'W': if (player_y > 0) new_y--; break;
+            case 's': case 'S': if (player_y < REALM_HEIGHT - 1) new_y++; break;
+            case 'a': case 'A': if (player_x > 0) new_x--; break;
+            case 'd': case 'D': if (player_x < REALM_WIDTH - 1) new_x++; break;
+            case 'm': case 'M':
+                clearScreen();
+                printHeader("REALM MAP");
+                displayRealmMap(realm_map, player_x, player_y, current_realm);
+                printf("\nPress any key to continue...\n");
+                _getch();
+                continue;
+            case 'i': case 'I':
+                showInventory(p, inv);
+                continue;
+            case 'x': case 'X':
+                if (realm_map[player_y][player_x].is_exit) {
+                    printHeader("RETURNING TO TOWN");
+                    printf("You step back through the portal to safety.\n");
+                    
+                    // Realm completion bonus
+                    int bonus = rooms_explored * 20;
+                    p->gold += bonus;
+                    p->experience += bonus;
+                    printf("Gained %d gold and experience as realm exploration bonus!\n", bonus);
+                    
+                    printf("\nPress any key to continue...\n");
+                    _getch();
+                    return;
+                }
+                continue;
+            case 'q': case 'Q':
+                printf("Emergency portal out? You'll lose rewards! (y/n): ");
+                char confirm = _getch();
+                printf("\n");
+                if (confirm == 'y' || confirm == 'Y') {
+                    printBox("EMERGENCY PORTAL");
+                    printf("You activate an emergency return spell!\n");
+                    printf("\nPress any key to continue...\n");
+                    _getch();
+                    return;
+                }
+                continue;
+            default:
+                printf("Invalid choice!\n");
+                printf("\nPress any key to continue...\n");
+                _getch();
+                continue;
+        }
+        
+        // Move player
+        if (new_x != player_x || new_y != player_y) {
+            player_x = new_x;
+            player_y = new_y;
+            
+            if (!realm_map[player_y][player_x].visited) {
+                rooms_explored++;
+                realm_map[player_y][player_x].visited = true;
+            }
+            
+            // Handle room event
+            handleRealmRoomEvent(p, inv, &realm_map[player_y][player_x], current_realm);
+            
+            if (p->health <= 0) {
+                printf("\nYou have been defeated in the %s!\n", current_realm->name);
+                printf("Press any key to continue...\n");
+                _getch();
+                return;
+            }
+        }
+    }
+}
+
+void handleRealmRoomEvent(player *p, inventory *inv, realm_room *room, realm *current_realm) {
+    clearScreen();
+    printHeader("REALM CHAMBER");
+    
+    printf("You enter a new area...\n");
+    printf("%s\n\n", room->description);
+    
+    #ifdef _WIN32
+        Sleep(2000);
+    #else
+        usleep(2000 * 1000);
+    #endif
+    
+    if (room->has_enemy) {
+        printBox("REALM ENEMY ENCOUNTER!");
+        enemy e;
+        spawnRealmEnemy(p, &e, current_realm);
+        room->has_enemy = false;
+        
+    } else if (room->has_treasure) {
+        printBox("REALM TREASURE!");
+        realmFindTreasure(p, inv, current_realm);
+        room->has_treasure = false;
+        
+    } else if (room->has_boss) {
+        printBox("REALM BOSS!");
+        realmEncounterBoss(p, inv, current_realm);
+        room->has_boss = false;
+        
+    } else if (room->is_exit) {
+        printBox("RETURN PORTAL");
+        printf("The portal back to town shimmers before you.\n");
+        printf("Use 'X' to return when ready.\n");
+        
+    } else {
+        // Empty room - realm-specific minor event
+        int event = random_range(1, 3);
+        switch (event) {
+            case 1:
+                printf("You find some realm-specific materials.\n");
+                int minor_gold = random_range(10, 25) + p->level * 2;
+                minor_gold = (minor_gold * current_realm->gold_multiplier) / 100;
+                p->gold += minor_gold;
+                printf("Found %d gold!\n", minor_gold);
+                break;
+            case 2:
+                printf("The realm's energy revitalizes you.\n");
+                int heal = random_range(10, 20);
+                p->health += heal;
+                if (p->health > p->max_health) p->health = p->max_health;
+                printf("Restored %d health!\n", heal);
+                break;
+            case 3:
+                printf("You gain insight from the alien environment.\n");
+                int exp = random_range(15, 30) + p->level;
+                exp = (exp * current_realm->exp_multiplier) / 100;
+                p->experience += exp;
+                printf("Gained %d experience!\n", exp);
+                break;
+        }
+    }
+    
+    printf("\nPress any key to continue...\n");
+    _getch();
+}
+
+void spawnRealmEnemy(player *p, enemy *e, realm *current_realm) {
+    const char *baseNames[] = {"Warrior", "Mage", "Hunter", "Brute", "Stalker", "Guardian"};
+    const char *baseName = baseNames[random_range(0, 5)];
+    
+    snprintf(e->name, sizeof(e->name), "%s %s", current_realm->enemy_prefix, baseName);
+    
+    // Scale stats with realm bonuses
+    e->health = random_range(30, 60) + (p->level * 5) + current_realm->base_health_bonus;
+    e->max_health = e->health;
+    e->attack = random_range(12, 20) + p->level + current_realm->base_attack_bonus;
+    e->defense = random_range(6, 12) + (p->level / 2);
+    e->level = p->level + 1;
+    
+    // Apply realm multipliers to rewards
+    e->experience = (random_range(25, 50) + (p->level * 8)) * current_realm->exp_multiplier / 100;
+    e->gold = (random_range(20, 40) + (p->level * 6)) * current_realm->gold_multiplier / 100;
+    e->is_boss = false;
+    
+    printf("A %s appears! Prepare for battle!\n", e->name);
+    
+    #ifdef _WIN32
+        Sleep(2000);
+    #else
+        usleep(2000 * 1000);
+    #endif
+    
+    // Use existing cave combat system
+    caveEncounterEnemy(p, e, 3); // Use depth 3 as base difficulty
+}
+
+void realmFindTreasure(player *p, inventory *inv, realm *current_realm) {
+    int treasureType = random_range(1, 3);
+    
+    switch (treasureType) {
+        case 1: // Gold
+            {
+                int goldFound = random_range(50, 100) + (p->level * 20);
+                goldFound = (goldFound * current_realm->gold_multiplier) / 100;
+                p->gold += goldFound;
+                p->total_gold_collected += goldFound;
+                printf("You discover a realm treasure chest!\n");
+                printf("Found %d gold pieces!\n", goldFound);
+            }
+            break;
+            
+        case 2: // Realm Weapon
+            {
+                weapon realmWeapon;
+                generateRealmWeapon(&realmWeapon, current_realm, p);
+                realmWeapon.attack += p->level + 8;
+                
+                printf("You find a realm-forged weapon!\n");
+                printf("Discovered: %s (Attack: %d)\n", realmWeapon.name, realmWeapon.attack);
+                
+                // Auto-equip if better
+                if (realmWeapon.attack > p->equipped.attack) {
+                    printf("You equip the powerful realm weapon!\n");
+                    p->equipped = realmWeapon;
+                } else {
+                    printf("Your current weapon is better.\n");
+                }
+            }
+            break;
+            
+        case 3: // Special Item
+            {
+                printf("You find a rare realm artifact!\n");
+                if (strcmp(current_realm->name, "Fire Realm") == 0) {
+                    p->max_health += 5;
+                    p->health += 5;
+                    printf("Permanent +5 Max Health from fire essence!\n");
+                } else if (strcmp(current_realm->name, "Ice Realm") == 0) {
+                    p->max_mana += 10;
+                    p->mana += 10;
+                    printf("Permanent +10 Max Mana from ice crystal!\n");
+                } else if (strcmp(current_realm->name, "Shadow Realm") == 0) {
+                    p->defense += 2;
+                    printf("Permanent +2 Defense from shadow cloak!\n");
+                }
+            }
+            break;
+    }
+}
+
+void generateRealmWeapon(weapon *w, realm *current_realm, player *p) {
+    const char *realm_prefix = "";
+    const char *base_weapons[] = {"Sword", "Axe", "Dagger", "Spear", "Bow", "Mace"};
+    
+    if (strcmp(current_realm->name, "Fire Realm") == 0) {
+        const char *prefixes[] = {"Flaming", "Molten", "Inferno", "Blazing"};
+        realm_prefix = prefixes[random_range(0, 3)];
+    } else if (strcmp(current_realm->name, "Ice Realm") == 0) {
+        const char *prefixes[] = {"Frost", "Glacial", "Ice", "Arctic"};
+        realm_prefix = prefixes[random_range(0, 3)];
+    } else if (strcmp(current_realm->name, "Shadow Realm") == 0) {
+        const char *prefixes[] = {"Shadow", "Dark", "Void", "Night"};
+        realm_prefix = prefixes[random_range(0, 3)];
+    }
+
+    const char *base_weapon = base_weapons[random_range(0, 5)];
+    snprintf(w->name, sizeof(w->name), "%s %s", realm_prefix, base_weapon);
+
+    w->attack = random_range(10, 20);
+    w->level = p->level;
+    w->durability = random_range(60, 100);
+    w->value = w->attack * 8;
+}
+
+
+void spawnRealmBoss(player *p, enemy *boss, realm *current_realm) {
+    const char *bossNames[] = {"Lord", "Titan", "Behemoth", "Overlord", "Ancient"};
+    const char *bossType = bossNames[random_range(0, 4)];
+    
+    snprintf(boss->name, sizeof(boss->name), "%s %s", current_realm->enemy_prefix, bossType);
+    
+    boss->max_health = 150 + (p->level * 15) + (current_realm->base_health_bonus * 2);
+    boss->health = boss->max_health;
+    boss->attack = 30 + (p->level * 3) + (current_realm->base_attack_bonus * 2);
+    boss->defense = 15 + p->level;
+    boss->level = p->level + 3;
+    boss->experience = (300 + (p->level * 40)) * current_realm->exp_multiplier / 100;
+    boss->gold = (400 + (p->level * 60)) * current_realm->gold_multiplier / 100;
+    boss->is_boss = true;
+}
+
+void realmEncounterBoss(player *p, inventory *inv, realm *current_realm) {
+    enemy boss;
+    spawnRealmBoss(p, &boss, current_realm);
+    
+    printf("The %s emerges - a true master of this realm!\n", boss.name);
+    printf("This creature radiates immense otherworldly power!\n");
+    
+    #ifdef _WIN32
+        Sleep(3000);
+    #else
+        usleep(3000 * 1000);
+    #endif
+    
+    bossBattle(p, &boss);
+    
+    if (p->health > 0) {
+        // Special realm boss reward
+        printf("\nThe realm boss drops an epic treasure!\n");
+        weapon realm_legendary;
+        generateRealmWeapon(&realm_legendary, current_realm, p);
+        realm_legendary.attack += 20 + p->level;
+        strcat(realm_legendary.name, " of Domination");
+        p->equipped = realm_legendary;
+        printf("You obtain: %s (Attack: %d)!\n", realm_legendary.name, realm_legendary.attack);
+        
+        int bonus_gold = 500 + (p->level * 80);
+        bonus_gold = (bonus_gold * current_realm->gold_multiplier) / 100;
+        p->gold += bonus_gold;
+        p->total_gold_collected += bonus_gold;
+        printf("Also found %d gold in the boss's hoard!\n", bonus_gold);
+        
+        // Permanent stat boost
+        if (strcmp(current_realm->name, "Fire Realm") == 0) {
+            p->attack += 3;
+            printf("Gained permanent +3 Attack from fire essence!\n");
+        } else if (strcmp(current_realm->name, "Ice Realm") == 0) {
+            p->max_health += 20;
+            p->health += 20;
+            printf("Gained permanent +20 Max Health from ice core!\n");
+        } else if (strcmp(current_realm->name, "Shadow Realm") == 0) {
+            p->defense += 4;
+            printf("Gained permanent +4 Defense from shadow mantle!\n");
+        }
+        
+        #ifdef _WIN32
+            Sleep(3000);
+        #else
+            usleep(3000 * 1000);
+        #endif
+    }
+}
+
+// ==================== TOWN SYSTEM ====================
+
+void visitTown(player *p, inventory *inv, quest *quests, int *quest_count, npc *npcs, shop *game_shop, recipe *recipes) {
+    realm realms[MAX_REALMS];
+    initRealms(realms);
+    unlockRealms(p, realms);
+    
+    while (1) {
+        clearScreen();
+        printHeader("TOWN SQUARE");
+        printf("Welcome to the peaceful town of Oakhaven!\n\n");
+        
+        printf("1. Talk to Elder Marcus\n");
+        printf("2. Visit Blacksmith Goran\n");
+        printf("3. Speak with Mysterious Stranger\n");
+        printf("4. Visit Weapon Shop\n");
+        printf("5. Crafting Station\n");
+        printf("6. Multi-dimensional Portal\n");
+        printf("7. Return to Wilderness\n");
+        printSeparator();
+        printf("Choice: ");
+        
+        char choice = _getch();
+        printf("\n");
+        
+        switch (choice) {
+            case '1':
+                talkToNPC(p, inv, quests, quest_count, npcs, 0);
+                break;
+            case '2':
+                talkToNPC(p, inv, quests, quest_count, npcs, 1);
+                break;
+            case '3':
+                talkToNPC(p, inv, quests, quest_count, npcs, 2);
+                break;
+            case '4':
+                visitShop(p, inv, game_shop);
+                break;
+            case '5':
+                craftingSystem(p, inv, recipes);
+                break;
+            case '6':
+                showRealms(p, realms);
+                break;
+            case '7':
+                return;
+            default:
+                printf("Invalid choice!\n");
+                printf("Press any key to continue...\n");
+                _getch();
+                break;
         }
     }
 }
@@ -669,7 +1427,7 @@ void displayCaveMap(cave_room cave[CAVE_HEIGHT][CAVE_WIDTH], int player_x, int p
     printf("MAP LEGEND:\n");
     printf("P = Your Position | E = Exit | B = Boss | M = Monster\n");
     printf("T = Treasure | $ = Merchant | N = NPC | . = Empty Room\n");
-    printf("Arrow Down (Ctrl + X) = Stairs Down | Arrow Up (Ctrl + Y) = Stairs Up | ? = Unexplored\n");
+    printf("J = Stairs Down | U = Stairs Up | ? = Unexplored\n");
 }
 
 void caveWanderingSystem(player *p, inventory *inv, quest *quests, int quest_count) {
@@ -702,7 +1460,7 @@ void caveWanderingSystem(player *p, inventory *inv, quest *quests, int quest_cou
     while (in_cave && p->health > 0) {
         clearScreen();
         printHeader("CAVE EXPLORATION");
-        
+        showStats(p);
         printf("Current Depth: Level %d\n", current_depth);
         printf("Position: Room (%d, %d)\n", player_x, player_y);
         printf("Description: %s\n\n", cave_levels[current_depth-1][player_y][player_x].description);
@@ -715,9 +1473,9 @@ void caveWanderingSystem(player *p, inventory *inv, quest *quests, int quest_cou
         if (player_x > 0) printf("A - Go West\n");
         if (player_x < CAVE_WIDTH - 1) printf("D - Go East\n");
         if (cave_levels[current_depth-1][player_y][player_x].is_stairs_down && current_depth < MAX_CAVE_DEPTH) 
-            printf("Arrow Down (Ctrl + X)- Descend to Level %d\n", current_depth + 1);
+            printf("J - Descend to Level %d\n", current_depth + 1);
         if (cave_levels[current_depth-1][player_y][player_x].is_stairs_up && current_depth > 1) 
-            printf("Arrow Up (Ctrl + Y)- Ascend to Level %d\n", current_depth - 1);
+            printf("U - Ascend to Level %d\n", current_depth - 1);
         printf("M - Show Map\n");
         printf("I - Check Inventory\n");
         printf("R - Rest (Heal 10 HP, risk ambush)\n");
@@ -853,9 +1611,11 @@ void caveWanderingSystem(player *p, inventory *inv, quest *quests, int quest_cou
                     return;
                 }
                 continue;
-            case 24: // Ctrl+X for stairs down (↓)
-            case 25: // Ctrl+Y for stairs up (↑)
-                if (choice == 24 && cave_levels[current_depth-1][player_y][player_x].is_stairs_down) {
+            case 'J':
+            case 'j': // for stairs down (↓)
+            case 'U':
+            case 'u': // for stairs up (↑)
+                if (choice == 'J' && cave_levels[current_depth-1][player_y][player_x].is_stairs_down || choice == 'j' && cave_levels[current_depth-1][player_y][player_x].is_stairs_down) {
                     new_depth = current_depth + 1;
                     // Keep same position when changing levels
                     player_x = CAVE_WIDTH / 2;
@@ -863,7 +1623,7 @@ void caveWanderingSystem(player *p, inventory *inv, quest *quests, int quest_cou
                     printBox("DESCENDING DEEPER");
                     printf("You descend to cave level %d...\n", new_depth);
                     printf("The air grows colder and the dangers increase!\n");
-                } else if (choice == 25 && cave_levels[current_depth-1][player_y][player_x].is_stairs_up) {
+                } else if (choice == 'U' && cave_levels[current_depth-1][player_y][player_x].is_stairs_up || choice == 'u' && cave_levels[current_depth-1][player_y][player_x].is_stairs_up) {
                     new_depth = current_depth - 1;
                     // Keep same position when changing levels
                     player_x = CAVE_WIDTH / 2;
@@ -1416,28 +2176,493 @@ void showInventory(player *p, inventory *inv) {
 // ==================== SAVE/LOAD SYSTEM ====================
 bool saveGame(player *p, inventory *inv, quest *quests, int quest_count) {
     FILE *file = fopen("savegame.dat", "wb");
-    if (file) {
-        fwrite(p, sizeof(player), 1, file);
-        fwrite(inv, sizeof(inventory), 1, file);
-        fwrite(&quest_count, sizeof(int), 1, file);
-        fwrite(quests, sizeof(quest), quest_count, file);
-        fclose(file);
-        return true;
+    if (!file) {
+        printf("Error: Cannot create save file!\n");
+        return false;
     }
-    return false;
+    
+    // Write header with version and timestamp
+    char header[100];
+    time_t now = time(NULL);
+    snprintf(header, sizeof(header), "CAVES_CATASTROPHES_SAVE_v2.0|%lld", (long long)now);
+    fwrite(header, sizeof(char), 100, file);
+    
+    // Save player data with all progression stats
+    fwrite(p, sizeof(player), 1, file);
+    
+    // Save inventory
+    fwrite(inv, sizeof(inventory), 1, file);
+    
+    // Save quest system
+    fwrite(&quest_count, sizeof(int), 1, file);
+    fwrite(quests, sizeof(quest), quest_count, file);
+    
+    // Save skills (re-initialize on load but preserve unlocked state)
+    skill skills[MAX_SKILLS];
+    initSkills(skills);
+    fwrite(skills, sizeof(skill), MAX_SKILLS, file);
+    
+    // Save NPC states
+    npc npcs[MAX_NPCS];
+    initNPCs(npcs);
+    fwrite(npcs, sizeof(npc), MAX_NPCS, file);
+    
+    // Save shop state
+    shop game_shop;
+    initShop(&game_shop);
+    fwrite(&game_shop, sizeof(shop), 1, file);
+    
+    // Save crafting recipes
+    recipe recipes[MAX_RECIPES];
+    initCrafting(recipes);
+    fwrite(recipes, sizeof(recipe), MAX_RECIPES, file);
+    
+    // Save realm progression
+    realm realms[MAX_REALMS];
+    initRealms(realms);
+    unlockRealms(p, realms);
+    fwrite(realms, sizeof(realm), MAX_REALMS, file);
+    
+    // Save additional progression flags
+    int cave_progression = p->deepest_cave_level;
+    fwrite(&cave_progression, sizeof(int), 1, file);
+    
+    fclose(file);
+    
+    // Create backup save
+    FILE *backup = fopen("savegame.bak", "wb");
+    if (backup) {
+        fwrite(header, sizeof(char), 100, backup);
+        fwrite(p, sizeof(player), 1, backup);
+        fwrite(inv, sizeof(inventory), 1, backup);
+        fwrite(&quest_count, sizeof(int), 1, backup);
+        fwrite(quests, sizeof(quest), quest_count, backup);
+        fwrite(skills, sizeof(skill), MAX_SKILLS, backup);
+        fwrite(npcs, sizeof(npc), MAX_NPCS, backup);
+        fwrite(&game_shop, sizeof(shop), 1, backup);
+        fwrite(recipes, sizeof(recipe), MAX_RECIPES, backup);
+        fwrite(realms, sizeof(realm), MAX_REALMS, backup);
+        fwrite(&cave_progression, sizeof(int), 1, backup);
+        fclose(backup);
+    }
+    
+    return true;
 }
 
 bool loadGame(player *p, inventory *inv, quest *quests, int *quest_count) {
     FILE *file = fopen("savegame.dat", "rb");
-    if (file) {
-        fread(p, sizeof(player), 1, file);
-        fread(inv, sizeof(inventory), 1, file);
-        fread(quest_count, sizeof(int), 1, file);
-        fread(quests, sizeof(quest), *quest_count, file);
-        fclose(file);
-        return true;
+    if (!file) {
+        // Try backup file
+        file = fopen("savegame.bak", "rb");
+        if (!file) {
+            return false;
+        }
     }
-    return false;
+    
+    // Read and verify header
+    char header[100];
+    if (fread(header, sizeof(char), 100, file) != 100) {
+        fclose(file);
+        return false;
+    }
+    
+    // Verify it's our save file
+    if (strncmp(header, "CAVES_CATASTROPHES_SAVE", 23) != 0) {
+        fclose(file);
+        return false;
+    }
+    
+    // Load player data
+    if (fread(p, sizeof(player), 1, file) != 1) {
+        fclose(file);
+        return false;
+    }
+    
+    // Load inventory
+    if (fread(inv, sizeof(inventory), 1, file) != 1) {
+        fclose(file);
+        return false;
+    }
+    
+    // Load quest system
+    if (fread(quest_count, sizeof(int), 1, file) != 1) {
+        fclose(file);
+        return false;
+    }
+    
+    if (fread(quests, sizeof(quest), *quest_count, file) != (size_t)(*quest_count)) {
+        fclose(file);
+        return false;
+    }
+    
+    // Load skills and preserve unlocked state
+    skill loaded_skills[MAX_SKILLS];
+    if (fread(loaded_skills, sizeof(skill), MAX_SKILLS, file) != MAX_SKILLS) {
+        fclose(file);
+        return false;
+    }
+    
+    // Load NPC states
+    npc loaded_npcs[MAX_NPCS];
+    if (fread(loaded_npcs, sizeof(npc), MAX_NPCS, file) != MAX_NPCS) {
+        fclose(file);
+        return false;
+    }
+    
+    // Load shop state
+    shop loaded_shop;
+    if (fread(&loaded_shop, sizeof(shop), 1, file) != 1) {
+        fclose(file);
+        return false;
+    }
+    
+    // Load crafting recipes
+    recipe loaded_recipes[MAX_RECIPES];
+    if (fread(loaded_recipes, sizeof(recipe), MAX_RECIPES, file) != MAX_RECIPES) {
+        fclose(file);
+        return false;
+    }
+    
+    // Load realm progression
+    realm loaded_realms[MAX_REALMS];
+    if (fread(loaded_realms, sizeof(realm), MAX_REALMS, file) != MAX_REALMS) {
+        fclose(file);
+        return false;
+    }
+    
+    // Load additional progression
+    int cave_progression;
+    if (fread(&cave_progression, sizeof(int), 1, file) != 1) {
+        fclose(file);
+        return false;
+    }
+    
+    fclose(file);
+    
+    // Update player's deepest cave level if loaded progression is higher
+    if (cave_progression > p->deepest_cave_level) {
+        p->deepest_cave_level = cave_progression;
+    }
+    
+    return true;
+}
+
+// Enhanced save function with multiple slots
+bool saveGameToSlot(player *p, inventory *inv, quest *quests, int quest_count, int slot) {
+    char filename[50];
+    snprintf(filename, sizeof(filename), "savegame_%d.dat", slot);
+    
+    FILE *file = fopen(filename, "wb");
+    if (!file) {
+        printf("Error: Cannot create save file for slot %d!\n", slot);
+        return false;
+    }
+    
+    // Write header with version and timestamp
+    char header[100];
+    time_t now = time(NULL);
+    snprintf(header, sizeof(header), "CAVES_CATASTROPHES_SAVE_v2.0|%lld|slot%d", (long long)now, slot);
+    fwrite(header, sizeof(char), 100, file);
+    
+    // Save all game data
+    fwrite(p, sizeof(player), 1, file);
+    fwrite(inv, sizeof(inventory), 1, file);
+    fwrite(&quest_count, sizeof(int), 1, file);
+    fwrite(quests, sizeof(quest), quest_count, file);
+    
+    // Save additional systems
+    skill skills[MAX_SKILLS];
+    initSkills(skills);
+    fwrite(skills, sizeof(skill), MAX_SKILLS, file);
+    
+    npc npcs[MAX_NPCS];
+    initNPCs(npcs);
+    fwrite(npcs, sizeof(npc), MAX_NPCS, file);
+    
+    shop game_shop;
+    initShop(&game_shop);
+    fwrite(&game_shop, sizeof(shop), 1, file);
+    
+    recipe recipes[MAX_RECIPES];
+    initCrafting(recipes);
+    fwrite(recipes, sizeof(recipe), MAX_RECIPES, file);
+    
+    realm realms[MAX_REALMS];
+    initRealms(realms);
+    unlockRealms(p, realms);
+    fwrite(realms, sizeof(realm), MAX_REALMS, file);
+    
+    int cave_progression = p->deepest_cave_level;
+    fwrite(&cave_progression, sizeof(int), 1, file);
+    
+    fclose(file);
+    
+    printBox("GAME SAVED SUCCESSFULLY");
+    printf("Game saved to slot %d\n", slot);
+    printf("Timestamp: %s", ctime(&now));
+    
+    return true;
+}
+
+bool loadGameFromSlot(player *p, inventory *inv, quest *quests, int *quest_count, int slot) {
+    char filename[50];
+    snprintf(filename, sizeof(filename), "savegame_%d.dat", slot);
+    
+    FILE *file = fopen(filename, "rb");
+    if (!file) {
+        return false;
+    }
+    
+    char header[100];
+    if (fread(header, sizeof(char), 100, file) != 100) {
+        fclose(file);
+        return false;
+    }
+    
+    if (strncmp(header, "CAVES_CATASTROPHES_SAVE", 23) != 0) {
+        fclose(file);
+        return false;
+    }
+    
+    // Load all game data
+    if (fread(p, sizeof(player), 1, file) != 1) {
+        fclose(file);
+        return false;
+    }
+    
+    if (fread(inv, sizeof(inventory), 1, file) != 1) {
+        fclose(file);
+        return false;
+    }
+    
+    if (fread(quest_count, sizeof(int), 1, file) != 1) {
+        fclose(file);
+        return false;
+    }
+
+    if (fread(quests, sizeof(quest), *quest_count, file) != (size_t)(*quest_count)) {
+        fclose(file);
+        return false;
+    }
+    
+    // Skip other systems for now (they'll be re-initialized)
+    fseek(file, sizeof(skill) * MAX_SKILLS + sizeof(npc) * MAX_NPCS + 
+          sizeof(shop) + sizeof(recipe) * MAX_RECIPES + sizeof(realm) * MAX_REALMS, SEEK_CUR);
+    
+    int cave_progression;
+    if (fread(&cave_progression, sizeof(int), 1, file) != 1) {
+        fclose(file);
+        return false;
+    }
+    
+    fclose(file);
+    
+    // Update progression
+    if (cave_progression > p->deepest_cave_level) {
+        p->deepest_cave_level = cave_progression;
+    }
+    
+    return true;
+}
+
+// Enhanced save/load menu
+void saveLoadMenu(player *p, inventory *inv, quest *quests, int quest_count) {
+    while (1) {
+        clearScreen();
+        printHeader("SAVE/LOAD SYSTEM");
+        
+        printf("1. Quick Save (Slot 0)\n");
+        printf("2. Save to Slot 1\n");
+        printf("3. Save to Slot 2\n");
+        printf("4. Save to Slot 3\n");
+        printf("5. Load from Slot 0\n");
+        printf("6. Load from Slot 1\n");
+        printf("7. Load from Slot 2\n");
+        printf("8. Load from Slot 3\n");
+        printf("9. Back to Main Menu\n");
+        printSeparator();
+        printf("Choice: ");
+        
+        char choice = _getch();
+        printf("\n");
+        
+        switch (choice) {
+            case '1':
+                if (saveGameToSlot(p, inv, quests, quest_count, 0)) {
+                    printf("Game saved successfully!\n");
+                } else {
+                    printf("Failed to save game!\n");
+                }
+                printf("\nPress any key to continue...\n");
+                _getch();
+                break;
+                
+            case '2':
+                if (saveGameToSlot(p, inv, quests, quest_count, 1)) {
+                    printf("Game saved to slot 1!\n");
+                } else {
+                    printf("Failed to save game!\n");
+                }
+                printf("\nPress any key to continue...\n");
+                _getch();
+                break;
+                
+            case '3':
+                if (saveGameToSlot(p, inv, quests, quest_count, 2)) {
+                    printf("Game saved to slot 2!\n");
+                } else {
+                    printf("Failed to save game!\n");
+                }
+                printf("\nPress any key to continue...\n");
+                _getch();
+                break;
+                
+            case '4':
+                if (saveGameToSlot(p, inv, quests, quest_count, 3)) {
+                    printf("Game saved to slot 3!\n");
+                } else {
+                    printf("Failed to save game!\n");
+                }
+                printf("\nPress any key to continue...\n");
+                _getch();
+                break;
+                
+            case '5':
+                if (loadGameFromSlot(p, inv, quests, &quest_count, 0)) {
+                    printBox("GAME LOADED SUCCESSFULLY");
+                    printf("Loaded game from slot 0!\n");
+                } else {
+                    printf("No save game found in slot 0!\n");
+                }
+                printf("\nPress any key to continue...\n");
+                _getch();
+                return;
+                
+            case '6':
+                if (loadGameFromSlot(p, inv, quests, &quest_count, 1)) {
+                    printBox("GAME LOADED SUCCESSFULLY");
+                    printf("Loaded game from slot 1!\n");
+                } else {
+                    printf("No save game found in slot 1!\n");
+                }
+                printf("\nPress any key to continue...\n");
+                _getch();
+                return;
+                
+            case '7':
+                if (loadGameFromSlot(p, inv, quests, &quest_count, 2)) {
+                    printBox("GAME LOADED SUCCESSFULLY");
+                    printf("Loaded game from slot 2!\n");
+                } else {
+                    printf("No save game found in slot 2!\n");
+                }
+                printf("\nPress any key to continue...\n");
+                _getch();
+                return;
+                
+            case '8':
+                if (loadGameFromSlot(p, inv, quests, &quest_count, 3)) {
+                    printBox("GAME LOADED SUCCESSFULLY");
+                    printf("Loaded game from slot 3!\n");
+                } else {
+                    printf("No save game found in slot 3!\n");
+                }
+                printf("\nPress any key to continue...\n");
+                _getch();
+                return;
+                
+            case '9':
+                return;
+                
+            default:
+                printf("Invalid choice!\n");
+                printf("\nPress any key to continue...\n");
+                _getch();
+                break;
+        }
+    }
+}
+
+// Auto-save function
+bool autoSaveGame(player *p, inventory *inv, quest *quests, int quest_count) {
+    char filename[50];
+    snprintf(filename, sizeof(filename), "autosave.dat");
+    
+    FILE *file = fopen(filename, "wb");
+    if (!file) {
+        return false;
+    }
+    
+    // Simple auto-save with just essential data
+    char header[100];
+    time_t now = time(NULL);
+    snprintf(header, sizeof(header), "CAVES_CATASTROPHES_AUTOSAVE|%lld", (long long)now);
+    fwrite(header, sizeof(char), 100, file);
+    
+    fwrite(p, sizeof(player), 1, file);
+    fwrite(inv, sizeof(inventory), 1, file);
+    fwrite(&quest_count, sizeof(int), 1, file);
+    fwrite(quests, sizeof(quest), quest_count, file);
+    
+    fclose(file);
+    return true;
+}
+
+bool loadAutoSave(player *p, inventory *inv, quest *quests, int *quest_count) {
+    FILE *file = fopen("autosave.dat", "rb");
+    if (!file) {
+        return false;
+    }
+    
+    char header[100];
+    if (fread(header, sizeof(char), 100, file) != 100) {
+        fclose(file);
+        return false;
+    }
+    
+    if (strncmp(header, "CAVES_CATASTROPHES_AUTOSAVE", 27) != 0) {
+        fclose(file);
+        return false;
+    }
+    
+    if (fread(p, sizeof(player), 1, file) != 1) {
+        fclose(file);
+        return false;
+    }
+    
+    if (fread(inv, sizeof(inventory), 1, file) != 1) {
+        fclose(file);
+        return false;
+    }
+    
+    if (fread(quest_count, sizeof(int), 1, file) != 1) {
+        fclose(file);
+        return false;
+    }
+    
+    if (fread(quests, sizeof(quest), *quest_count, file) != (size_t)(*quest_count)) {
+        fclose(file);
+        return false;
+    }
+    
+    fclose(file);
+    return true;
+}
+
+// Add this to your start function for periodic auto-saves
+void checkAutoSave(player *p, inventory *inv, quest *quests, int quest_count, int *save_counter) {
+    (*save_counter)++;
+    if (*save_counter >= 10) { // Auto-save every 10 actions
+        if (autoSaveGame(p, inv, quests, quest_count)) {
+            printf("\n[AUTO-SAVE] Game progress automatically saved.\n");
+            #ifdef _WIN32
+                Sleep(1000);
+            #else
+                usleep(1000 * 1000);
+            #endif
+        }
+        *save_counter = 0;
+    }
 }
 
 // ==================== QUEST ====================
@@ -2090,52 +3315,6 @@ void craftingSystem(player *p, inventory *inv, recipe *recipes) {
     _getch();
 }
 
-// ==================== TOWN SYSTEM ====================
-void visitTown(player *p, inventory *inv, quest *quests, int *quest_count, npc *npcs, shop *game_shop, recipe *recipes) {
-    while (1) {
-        clearScreen();
-        printHeader("TOWN SQUARE");
-        printf("Welcome to the peaceful town of Oakhaven!\n\n");
-        
-        printf("1. Talk to Elder Marcus\n");
-        printf("2. Visit Blacksmith Goran\n");
-        printf("3. Speak with Mysterious Stranger\n");
-        printf("4. Visit Weapon Shop\n");
-        printf("5. Crafting Station\n");
-        printf("6. Return to Wilderness\n");
-        printSeparator();
-        printf("Choice: ");
-        
-        char choice = _getch();
-        printf("\n");
-        
-        switch (choice) {
-            case '1':
-                talkToNPC(p, inv, quests, quest_count, npcs, 0);
-                break;
-            case '2':
-                talkToNPC(p, inv, quests, quest_count, npcs, 1);
-                break;
-            case '3':
-                talkToNPC(p, inv, quests, quest_count, npcs, 2);
-                break;
-            case '4':
-                visitShop(p, inv, game_shop);
-                break;
-            case '5':
-                craftingSystem(p, inv, recipes);
-                break;
-            case '6':
-                return;
-            default:
-                printf("Invalid choice!\n");
-                printf("Press any key to continue...\n");
-                _getch();
-                break;
-        }
-    }
-}
-
 // ==================== GAME FUNCTIONS ====================
 void exploreArea(player *p) {
     clearScreen();
@@ -2368,6 +3547,8 @@ void enterCave(player *p) {
             foundWeapon.attack += p->level * 2;
             printf("You found: %s (Attack: %d)!\n", foundWeapon.name, foundWeapon.attack);
             p->equipped = foundWeapon;
+            printf("Press any key to continue...\n");
+            _getch();
             break;
             
         case 2: // Monster encounter
@@ -2375,6 +3556,8 @@ void enterCave(player *p) {
             typewrite("A powerful creature guards this chamber!", 50);
             printf("\n");
             exploreArea(p); // This will trigger an enemy encounter
+            printf("Press any key to continue...\n");
+            _getch();
             break;
             
         case 3: // Boss encounter (rare)
@@ -2382,12 +3565,16 @@ void enterCave(player *p) {
                 enemy boss;
                 spawnBoss(p, &boss);
                 bossBattle(p, &boss);
+                printf("Press any key to continue...\n");
+                _getch();
             } else {
                 printHeader("ANCIENT INSCRIPTIONS");
                 typewrite("You discover wisdom carved into the stone walls.", 50);
                 printf("\n");
                 p->experience += 50 + (p->level * 10);
                 printf("Gained %d experience from ancient knowledge!\n", 50 + (p->level * 10));
+                printf("Press any key to continue...\n");
+                _getch();
             }
             break;
             
@@ -2399,6 +3586,8 @@ void enterCave(player *p) {
             p->gold += goldFound;
             p->total_gold_collected += goldFound;
             printf("Found %d gold pieces!\n", goldFound);
+            printf("Press any key to continue...\n");
+            _getch();
             break;
     }
 
@@ -2409,7 +3598,7 @@ void enterCave(player *p) {
 }
 
 void caveNavigation(player *p) {
-    // Simplified cave navigation for this implementation
+    
     printf("You decide to explore deeper...\n");
     #ifdef _WIN32
         Sleep(2000);
@@ -2476,8 +3665,9 @@ void help(void) {
     printf("7. Cave Exploration System\n");
     printf("8. Town & NPC Interactions\n");
     printf("9. Crafting & Economy\n");
-    printf("10. Random Generation Systems\n");
-    printf("11. Advanced Tips & Strategies\n\n");
+    printf("10. Multi-dimensional Realms\n");
+    printf("11. Random Generation Systems\n");
+    printf("12. Advanced Tips & Strategies\n\n");
     
     printf("Press any key to continue through sections...\n");
     _getch();
@@ -2495,19 +3685,25 @@ void help(void) {
     printf("1 - Explore Forest       2 - Enter Cave System\n");
     printf("3 - Rest & Recover       4 - Check Inventory\n");
     printf("5 - View Quests          6 - Skill Tree\n");
-    printf("7 - Visit Town           8 - Save Game\n");
+    printf("7 - Visit Town           8 - Save/Load Game\n");
     printf("9 - Exit to Main Menu\n\n");
     
     printf("CAVE NAVIGATION CONTROLS:\n");
     printf("W - Move North           A - Move West\n");
     printf("S - Move South           D - Move East\n");
-    printf("Arrow Down (Ctrl+X) - Descend     Arrow Up (Ctrl+Y) - Ascend\n");
+    printf("J - Descend Deeper       U - Ascend Higher\n");
     printf("M - Show Map             I - Inventory\n");
     printf("R - Rest in Cave         X - Exit Cave System\n");
     printf("Q - Quit to Entrance\n\n");
     
+    printf("REALM NAVIGATION CONTROLS:\n");
+    printf("W - Move North           A - Move West\n");
+    printf("S - Move South           D - Move East\n");
+    printf("M - Show Map             I - Inventory\n");
+    printf("X - Return to Town       Q - Emergency Portal\n\n");
+    
     printf("COMBAT CONTROLS:\n");
-    printf("1 - Normal Attack        2 - Defend\n");
+    printf("1 - Normal Attack        2 - Defend (Reduces Damage)\n");
     printf("3 - Special Attack       4 - Use Potion\n");
     printf("5 - Attempt to Flee\n\n");
     
@@ -2520,30 +3716,28 @@ void help(void) {
     
     // SECTION 2: CHARACTER PROGRESSION
     clearScreen();
-    printHeader("2. CHARACTER PROGRESSION");
+    printHeader("2. CHARACTER PROGRESSION SYSTEM");
     
-    printf("LEVELING SYSTEM:\n");
+    printf("LEVELING UP:\n");
     printf("- Gain experience from defeating enemies and completing quests\n");
     printf("- Level up when experience reaches: Current Level × 100\n");
     printf("- Each level grants: +10 Max Health, +2 Attack, +1 Defense\n");
-    printf("- Also gain: +1 Skill Point, +5 Max Mana\n");
-    printf("- Mana and Health fully restore on level up\n\n");
+    printf("- Also gain: +1 Skill Point, +5 Max Mana\n\n");
     
-    printf("STAT EXPLANATIONS:\n");
+    printf("STAT EXPLANATION:\n");
     printf("HEALTH: When reaches 0, game over. Restored by potions and resting\n");
     printf("MANA: Used for special attacks. Restored by scrolls and resting\n");
-    printf("ATTACK: Base damage + weapon damage = total combat effectiveness\n");
+    printf("ATTACK: Base damage + weapon damage in combat\n");
     printf("DEFENSE: Reduces damage taken from enemy attacks\n");
-    printf("EXPERIENCE: Gain from combat and quests. Levels improve all stats\n");
-    printf("GOLD: Currency for buying items, weapons, and crafting\n\n");
+    printf("GOLD: Currency for shops, crafting, and merchant encounters\n\n");
     
-    printf("TRACKING STATISTICS:\n");
-    printf("- Monsters Defeated: Total enemies killed\n");
+    printf("PROGRESSION TRACKING:\n");
+    printf("- Monsters Defeated: Total enemies defeated\n");
     printf("- Quests Completed: Story and side quests finished\n");
-    printf("- Total Gold Collected: Lifetime gold earnings\n");
-    printf("- Caves Explored: Times entering cave system\n");
-    printf("- Rooms Explored: Individual cave chambers discovered\n");
-    printf("- Deepest Cave Level: Your record depth achievement\n\n");
+    printf("- Caves Explored: Number of cave expeditions\n");
+    printf("- Rooms Explored: Total rooms discovered in caves\n");
+    printf("- Deepest Level: Maximum cave depth reached\n");
+    printf("- Total Gold: Lifetime gold collected\n\n");
     
     printf("Press any key to continue...\n");
     _getch();
@@ -2553,36 +3747,29 @@ void help(void) {
     printHeader("3. COMBAT SYSTEM - MASTERING BATTLE");
     
     printf("COMBAT ACTIONS:\n");
-    printf("NORMAL ATTACK: Standard attack using your equipped weapon\n");
-    printf("   - Damage: Weapon Attack + Base Attack ± random variation\n");
-    printf("   - No cost, reliable damage\n\n");
+    printf("NORMAL ATTACK: Standard attack using your weapon + base attack\n");
+    printf("DEFEND: Reduces incoming damage by 50%% but skips your attack\n");
+    printf("SPECIAL ATTACK: Powerful strike costing 15 mana (2x normal damage)\n");
+    printf("USE POTION: Instantly heal 25 HP (if available in inventory)\n");
+    printf("FLEE: Attempt to escape (success chance decreases in deeper areas)\n\n");
     
-    printf("DEFEND: Reduce incoming damage significantly\n");
-    printf("   - Enemy deals only 30-50%% of normal damage\n");
-    printf("   - No offensive capability this turn\n");
-    printf("   - Great against powerful enemies or when low on health\n\n");
-    
-    printf("SPECIAL ATTACK: Powerful strike costing mana\n");
-    printf("   - Cost: 15 Mana (cave) / 10 Mana (boss)\n");
-    printf("   - Damage: Approximately 2× normal attack damage\n");
-    printf("   - Best used when you have mana to spare\n\n");
-    
-    printf("USE POTION: Instant health recovery\n");
-    printf("   - Restores 25-40 health immediately\n");
-    printf("   - No turn penalty in cave system\n");
-    printf("   - Limited supply - use strategically\n\n");
-    
-    printf("FLEE: Attempt to escape combat\n");
-    printf("   - Base Success: 60%% (reduces with cave depth)\n");
-    printf("   - Boss fights: Only 20%% success chance\n");
-    printf("   - Failed escape wastes turn\n\n");
+    printf("DAMAGE CALCULATION:\n");
+    printf("Your Damage = (Base Attack + Weapon Attack) ± Random Variation\n");
+    printf("Enemy Damage = Enemy Attack - Your Defense ± Random Variation\n");
+    printf("Minimum damage is always 1 point\n\n");
     
     printf("COMBAT STRATEGIES:\n");
-    printf("- Use Defend against strong enemies to minimize damage\n");
-    printf("- Save Special Attacks for tough opponents or bosses\n");
-    printf("- Don't let health drop below 30%% without healing option\n");
-    printf("- Flee when outmatched - live to fight another day\n");
-    printf("- Balance mana usage between multiple encounters\n\n");
+    printf("- Use DEFEND when low on health to minimize damage\n");
+    printf("- SPECIAL ATTACKS are mana-efficient for tough enemies\n");
+    printf("- FLEE when outmatched - better to retreat and fight another day\n");
+    printf("- Manage potions carefully - they're limited resources\n");
+    printf("- Boss battles require careful resource management\n\n");
+    
+    printf("ENEMY TYPES:\n");
+    printf("REGULAR: Standard enemies with balanced stats\n");
+    printf("CHAMPIONS: Rare stronger variants (5%% chance in forest)\n");
+    printf("BOSSES: Major encounters with special rewards\n");
+    printf("REALM ENEMIES: Dimension-specific creatures with unique traits\n\n");
     
     printf("Press any key to continue...\n");
     _getch();
@@ -2592,458 +3779,321 @@ void help(void) {
     printHeader("4. INVENTORY & EQUIPMENT MANAGEMENT");
     
     printf("INVENTORY LIMITS:\n");
-    printf("- Maximum %d weapons in inventory\n", MAX_INVENTORY);
-    printf("- Consumables (potions/scrolls) have separate storage\n");
-    printf("- Weapons can be bought, found, or crafted\n\n");
+    printf("Weapons: %d maximum slots\n", MAX_INVENTORY);
+    printf("Potions: Unlimited quantity (but rare to find)\n");
+    printf("Scrolls: Unlimited quantity (very rare)\n\n");
     
-    printf("EQUIPMENT SLOTS:\n");
-    printf("WEAPON: Determines your attack power in combat\n");
-    printf("   - Higher attack = more damage per strike\n");
-    printf("   - Auto-equip better weapons when found\n");
-    printf("   - Compare stats before replacing current weapon\n\n");
-    
-    printf("CONSUMABLES:\n");
-    printf("HEALTH POTIONS: Restore 25-40 health instantly\n");
-    printf("   - Found in treasure, bought from merchants, random events\n");
-    printf("   - Essential for surviving tough battles\n\n");
-    
-    printf("MAGIC SCROLLS: Restore 30 mana instantly\n");
-    printf("   - Allows more special attacks in extended cave runs\n");
-    printf("   - Rare find - use strategically\n\n");
-    
-    printf("INVENTORY MANAGEMENT:\n");
-    printf("- Sell unwanted weapons in town for gold\n");
-    printf("- Keep backup weapons in case current one breaks\n");
-    printf("- Balance carrying healing vs. offensive capabilities\n");
-    printf("- Don't hoard - use consumables when needed\n\n");
+    printf("EQUIPMENT TYPES:\n");
+    printf("WEAPONS: Primary source of attack power. Auto-equip if better\n");
+    printf("POTIONS: Restore 25 HP instantly during combat or exploration\n");
+    printf("SCROLLS: Restore 30 MP instantly\n\n");
     
     printf("WEAPON STATS:\n");
-    printf("ATTACK: Primary damage stat\n");
+    printf("ATTACK: Damage bonus added to your base attack\n");
     printf("LEVEL: Required level to use effectively\n");
-    printf("DURABILITY: How long before weapon degrades\n");
-    printf("VALUE: Gold worth when selling\n\n");
+    printf("DURABILITY: Weapon condition (affects value)\n");
+    printf("VALUE: Gold worth when selling to merchants\n\n");
+    
+    printf("INVENTORY MANAGEMENT TIPS:\n");
+    printf("- Always equip your highest attack weapon\n");
+    printf("- Sell weaker weapons to free up inventory space\n");
+    printf("- Save potions for boss fights and emergency situations\n");
+    printf("- Use scrolls before special attacks in tough battles\n");
+    printf("- Weapons found deeper in caves are generally better\n\n");
     
     printf("Press any key to continue...\n");
     _getch();
     
     // SECTION 5: QUEST SYSTEM
     clearScreen();
-    printHeader("5. QUEST SYSTEM - ADVENTURES & REWARDS");
+    printHeader("5. QUEST SYSTEM - GOALS & REWARDS");
     
     printf("QUEST TYPES:\n");
-    printf("MONSTER HUNTER: Defeat specific number of enemies\n");
-    printf("   - Progress: Monsters defeated in forest exploration\n");
-    printf("   - Great for combat-focused players\n\n");
-    
-    printf("WEALTH ACCUMULATOR: Collect large amounts of gold\n");
-    printf("   - Progress: Total gold collected from all sources\n");
-    printf("   - Rewards patient players who explore thoroughly\n\n");
-    
-    printf("CAVE EXPLORER: Fully explore multiple cave systems\n");
-    printf("   - Progress: Each complete cave exploration counts\n");
-    printf("   - Encourages risk-taking in dangerous areas\n\n");
-    
-    printf("DEPTH DIVER: Reach specific cave depth levels\n");
-    printf("   - Progress: Your deepest level reached\n");
-    printf("   - High-risk, high-reward gameplay\n\n");
+    printf("MONSTER HUNTER: Defeat 5 monsters in the forest\n");
+    printf("WEALTH ACCUMULATOR: Collect 500 gold total\n");
+    printf("CAVE EXPLORER: Completely explore 3 caves\n");
+    printf("DEPTH DIVER: Reach cave depth level 3\n");
+    printf("NPC QUESTS: Additional quests from town characters\n\n");
     
     printf("QUEST MECHANICS:\n");
-    printf("- Automatic progress tracking - no manual claiming\n");
-    printf("- Instant rewards upon completion\n");
+    printf("- Progress is automatically tracked\n");
     printf("- Multiple quests can be active simultaneously\n");
-    printf("- Quest log shows objectives, progress, and rewards\n");
-    printf("- Some quests unlock additional content\n\n");
+    printf("- Quest completion grants gold and experience\n");
+    printf("- Some quests unlock additional content\n");
+    printf("- NPC quests may have special story rewards\n\n");
     
-    printf("REWARD STRUCTURE:\n");
-    printf("- Gold: Direct currency for purchases\n");
-    printf("- Experience: Advances character level\n");
-    printf("- Sometimes unique items or story progression\n");
-    printf("- Completion counts toward overall statistics\n\n");
+    printf("QUEST REWARDS:\n");
+    printf("Monster Hunter: 100 Gold, 50 EXP\n");
+    printf("Wealth Accumulator: 200 Gold, 75 EXP\n");
+    printf("Cave Explorer: 150 Gold, 100 EXP\n");
+    printf("Depth Diver: 300 Gold, 150 EXP\n\n");
     
-    printf("QUEST STRATEGIES:\n");
-    printf("- Check quest log regularly to track progress\n");
-    printf("- Focus on quests that match your playstyle\n");
-    printf("- Some quests naturally complete through normal gameplay\n");
-    printf("- Use quest objectives to guide your exploration\n\n");
+    printf("QUEST COMPLETION TIPS:\n");
+    printf("- Focus on monster quests early for quick rewards\n");
+    printf("- Gold quest completes naturally through gameplay\n");
+    printf("- Cave exploration quests reward thorough exploration\n");
+    printf("- Check quest log frequently to track progress\n\n");
     
     printf("Press any key to continue...\n");
     _getch();
     
     // SECTION 6: SKILL TREE
     clearScreen();
-    printHeader("6. SKILL TREE - CHARACTER SPECIALIZATION");
+    printHeader("6. SKILL TREE - CHARACTER BUILDING");
     
     printf("SKILL POINTS:\n");
     printf("- Gain 1 skill point each level up\n");
-    printf("- Some skills cost multiple points\n");
-    printf("- Plan your build - choices are permanent\n");
-    printf("- Unlock powerful abilities and stat boosts\n\n");
+    printf("- Skills have level requirements and point costs\n");
+    printf("- Plan your build carefully - respec is not available\n");
+    printf("- Some skills provide passive bonuses, others enable new abilities\n\n");
     
     printf("AVAILABLE SKILLS:\n");
-    printf("WARRIOR STRENGTH (Level 2, 1 point)\n");
-    printf("   - +5 Attack, +20 Max Health\n");
-    printf("   - Great for melee-focused characters\n\n");
+    printf("Warrior Strength (Lvl 2, 1pt): +5 Attack, +20 Max Health\n");
+    printf("Rogue Agility (Lvl 2, 1pt): +3 Attack, +2 Defense\n");
+    printf("Mage Wisdom (Lvl 3, 1pt): +30 Max Mana\n");
+    printf("Critical Strike (Lvl 4, 2pt): Chance for double damage\n");
+    printf("Health Boost (Lvl 3, 1pt): +30 Max Health\n");
+    printf("Mana Flow (Lvl 4, 1pt): +20 Max Mana\n");
+    printf("Lucky Find (Lvl 5, 2pt): Better treasure from chests\n");
+    printf("Boss Slayer (Lvl 6, 3pt): +5 Attack, +3 Defense vs Bosses\n\n");
     
-    printf("ROGUE AGILITY (Level 2, 1 point)\n");
-    printf("   - +3 Attack, +2 Defense\n");
-    printf("   - Balanced offensive and defensive boost\n\n");
-    
-    printf("MAGE WISDOM (Level 3, 1 point)\n");
-    printf("   - +30 Max Mana\n");
-    printf("   - Essential for special attack users\n\n");
-    
-    printf("CRITICAL STRIKE (Level 4, 2 points)\n");
-    printf("   - Chance for double damage on attacks\n");
-    printf("   - High damage potential\n\n");
-    
-    printf("HEALTH BOOST (Level 3, 1 point)\n");
-    printf("   - +30 Max Health\n");
-    printf("   - Survivability focus\n\n");
-    
-    printf("MANA FLOW (Level 4, 1 point)\n");
-    printf("   - +20 Max Mana\n");
-    printf("   - More special attacks between rests\n\n");
-    
-    printf("LUCKY FIND (Level 5, 2 points)\n");
-    printf("   - Better treasure from chests\n");
-    printf("   - Economic advantage\n\n");
-    
-    printf("BOSS SLAYER (Level 6, 3 points)\n");
-    printf("   - +5 Attack, +3 Defense vs Bosses\n");
-    printf("   - Specialist anti-boss capability\n\n");
-    
-    printf("SKILL BUILD STRATEGIES:\n");
-    printf("- Warrior Path: Strength → Health Boost → Critical Strike\n");
-    printf("- Mage Path: Wisdom → Mana Flow → Critical Strike\n");
-    printf("- Balanced: Agility → Health Boost → versatile options\n");
-    printf("- Specialist: Focus on your preferred playstyle\n\n");
+    printf("BUILD RECOMMENDATIONS:\n");
+    printf("BALANCED: Warrior Strength + Health Boost + Critical Strike\n");
+    printf("TANK: Warrior Strength + Health Boost + Boss Slayer\n");
+    printf("MAGE: Mage Wisdom + Mana Flow + Critical Strike\n");
+    printf("EXPLORER: Lucky Find + Rogue Agility + Health Boost\n\n");
     
     printf("Press any key to continue...\n");
     _getch();
     
-    // SECTION 7: CAVE EXPLORATION
+    // SECTION 7: CAVE EXPLORATION SYSTEM
     clearScreen();
-    printHeader("7. CAVE EXPLORATION SYSTEM - DEPTHS & DANGERS");
+    printHeader("7. CAVE EXPLORATION - DEPTHS & DANGERS");
     
     printf("CAVE STRUCTURE:\n");
-    printf("- %d×%d grid of rooms per depth level\n", CAVE_WIDTH, CAVE_HEIGHT);
-    printf("- %d total depth levels to explore\n", MAX_CAVE_DEPTH);
-    printf("- Deeper levels = greater danger + better rewards\n");
-    printf("- Map reveals as you explore each room\n\n");
+    printf("- %dx%d grid system for each depth level\n", CAVE_WIDTH, CAVE_HEIGHT);
+    printf("- %d total depth levels with increasing difficulty\n", MAX_CAVE_DEPTH);
+    printf("- Stairs connect levels - descend to go deeper\n");
+    printf("- Final exit portal at the deepest level\n\n");
     
-    printf("ROOM TYPES & SYMBOLS:\n");
-    printf("P = Your Position          E = Final Exit (Level %d only)\n", MAX_CAVE_DEPTH);
-    printf("B = Boss Chamber           M = Monster Encounter\n");
-    printf("T = Treasure               $ = Wandering Merchant\n");
-    printf("N = Mysterious NPC         . = Explored Empty Room\n");
-    printf("↓ = Stairs Down            ↑ = Stairs Up\n");
-    printf("? = Unexplored Territory\n\n");
+    printf("ROOM TYPES:\n");
+    printf("ENEMY ROOMS: Combat encounters (more common at deeper levels)\n");
+    printf("TREASURE ROOMS: Gold, weapons, or special items\n");
+    printf("MERCHANT ROOMS: Temporary shops with special offers\n");
+    printf("NPC ROOMS: Story characters with dialogue and quests\n");
+    printf("BOSS ROOMS: Major challenges with legendary rewards\n");
+    printf("STAIR ROOMS: Access to deeper or higher levels\n");
+    printf("EMPTY ROOMS: Minor events or safe resting spots\n\n");
     
-    printf("DEPTH LEVEL MECHANICS:\n");
-    printf("LEVEL 1: Entrance area, basic enemies, introduction\n");
-    printf("LEVEL 2-3: Moderate challenge, merchants appear\n");
-    printf("LEVEL 4: Significant danger, valuable treasures\n");
-    printf("LEVEL %d: Ultimate challenge, final boss, epic rewards\n", MAX_CAVE_DEPTH);
-    printf("- Enemies get +5-10 stats per depth level\n");
-    printf("- Rewards increase 20-50%% per depth level\n\n");
+    printf("DEPTH MECHANICS:\n");
+    printf("LEVEL 1: Introduction with basic enemies and treasures\n");
+    printf("LEVEL 2-3: Medium difficulty, merchants may appear\n");
+    printf("LEVEL 4: High difficulty, NPC encounters possible\n");
+    printf("LEVEL 5: Maximum difficulty with final boss and exit\n");
+    printf("Deeper levels = stronger enemies but better rewards\n\n");
     
-    printf("CAVE STRATEGIES:\n");
-    printf("- Explore thoroughly before descending\n");
-    printf("- Use map to plan efficient routes\n");
-    printf("- Rest when needed but risk ambush (30%% + 5%% per level)\n");
-    printf("- Keep escape route in mind for emergency retreat\n");
-    printf("- Deeper levels require better preparation\n\n");
-    
-    printf("SPECIAL ROOM EVENTS:\n");
-    printf("MERCHANT: Buy powerful weapons (scaled to depth)\n");
-    printf("NPC: Lore, hints, sometimes gifts or healing\n");
-    printf("BOSS: Tough fight with unique rewards\n");
-    printf("TREASURE: Gold, weapons, or magical artifacts\n\n");
+    printf("EXPLORATION STRATEGIES:\n");
+    printf("- Map carefully to avoid getting lost\n");
+    printf("- Rest when health is low but beware ambushes\n");
+    printf("- Descend when well-equipped and healed\n");
+    printf("- Use merchants for emergency equipment upgrades\n");
+    printf("- Save before attempting deep explorations\n\n");
     
     printf("Press any key to continue...\n");
     _getch();
     
-    // SECTION 8: TOWN & NPCs
+    // SECTION 8: TOWN & NPC INTERACTIONS
     clearScreen();
-    printHeader("8. TOWN SYSTEM - SERVICES & INTERACTIONS");
+    printHeader("8. TOWN SYSTEM - SAFE HAVEN & SERVICES");
     
     printf("TOWN LOCATIONS:\n");
-    printf("ELDER MARCUS: Quest giver, story progression\n");
-    printf("BLACKSMITH GORAN: Weapon shop, equipment upgrades\n");
-    printf("MYSTERIOUS STRANGER: Lore, hints, rare information\n");
-    printf("WEAPON SHOP: Buy and sell weapons, rotating stock\n");
-    printf("CRAFTING STATION: Create powerful custom weapons\n\n");
+    printf("ELDER MARCUS: Town leader with main story quests\n");
+    printf("BLACKSMITH GORAN: Weapon upgrades and sales\n");
+    printf("MYSTERIOUS STRANGER: Lore and hidden knowledge\n");
+    printf("WEAPON SHOP: Buy and sell equipment\n");
+    printf("CRAFTING STATION: Create powerful custom weapons\n");
+    printf("MULTI-DIMENSIONAL PORTAL: Access to realm system\n\n");
     
     printf("NPC INTERACTIONS:\n");
-    printf("- Dialogue reveals world lore and hints\n");
-    printf("- Some NPCs offer quests with unique rewards\n");
-    printf("- Building relationships can unlock special services\n");
-    printf("- Pay attention to NPC dialogue for gameplay tips\n\n");
+    printf("- Each NPC has unique dialogue and personality\n");
+    printf("- Some NPCs offer quests with special rewards\n");
+    printf("- Talking to NPCs may reveal game lore and secrets\n");
+    printf("- Shop NPCs provide essential services for gold\n");
+    printf("- Some NPCs appear randomly in caves\n\n");
     
-    printf("SHOPPING STRATEGIES:\n");
-    printf("- Compare weapon stats before purchasing\n");
-    printf("- Sell unused weapons to free inventory space\n");
-    printf("- Shop inventory refreshes with new items\n");
-    printf("- Save gold for significant upgrades, not minor ones\n\n");
+    printf("TOWN SERVICES:\n");
+    printf("WEAPON SHOP: Buy new weapons, sell old ones\n");
+    printf("CRAFTING: Create specific weapons with set stats\n");
+    printf("REALM ACCESS: Portal to other dimensions\n");
+    printf("QUEST HUB: Receive and turn in quests\n");
+    printf("SAFE REST: Completely safe healing and recovery\n\n");
     
-    printf("ECONOMY MANAGEMENT:\n");
-    printf("- Balance spending between equipment and consumables\n");
-    printf("- Crafting can be cheaper than buying equivalent items\n");
-    printf("- Keep emergency gold for healing items\n");
-    printf("- Some purchases enable better money-making opportunities\n\n");
+    printf("TOWN STRATEGIES:\n");
+    printf("- Visit town after major expeditions to sell loot\n");
+    printf("- Check crafting for affordable weapon upgrades\n");
+    printf("- Always talk to NPCs for potential quests\n");
+    printf("- Use town as a safe base between dangerous trips\n");
+    printf("- Portal to realms only when well-prepared\n\n");
     
     printf("Press any key to continue...\n");
     _getch();
     
     // SECTION 9: CRAFTING & ECONOMY
     clearScreen();
-    printHeader("9. CRAFTING & ECONOMY - CREATE & MANAGE");
+    printHeader("9. CRAFTING & ECONOMY - RESOURCE MANAGEMENT");
     
-    printf("CRAFTING SYSTEM:\n");
-    printf("STEEL SWORD: 100 gold, 15 Attack (Level 3)\n");
-    printf("CRYSTAL DAGGER: 150 gold, 12 Attack (Level 4)\n");
-    printf("DRAGONBONE AXE: 300 gold, 25 Attack (Level 6)\n\n");
+    printf("CRAFTING RECIPES:\n");
+    printf("STEEL SWORD: 100 Gold - 15 Attack (Good early game)\n");
+    printf("CRYSTAL DAGGER: 150 Gold - 12 Attack (Fast, reliable)\n");
+    printf("DRAGONBONE AXE: 300 Gold - 25 Attack (Endgame weapon)\n\n");
     
-    printf("CRAFTING BENEFITS:\n");
-    printf("- Guaranteed access to specific weapon types\n");
-    printf("- Often cheaper than equivalent shop items\n");
-    printf("- No reliance on random merchant offerings\n");
-    printf("- Strategic weapon acquisition for your build\n\n");
+    printf("ECONOMY SOURCES:\n");
+    printf("ENEMY DROPS: Gold from defeated monsters\n");
+    printf("TREASURE CHESTS: Large gold amounts in caves\n");
+    printf("QUEST REWARDS: Substantial gold payments\n");
+    printf("ITEM SALES: Selling unused weapons to shops\n");
+    printf("RANDOM EVENTS: Unexpected gold finds or losses\n\n");
     
-    printf("ECONOMIC STRATEGIES:\n");
-    printf("EARLY GAME: Focus on basic equipment and healing\n");
-    printf("MID GAME: Invest in significant weapon upgrades\n");
-    printf("LATE GAME: Craft legendary weapons, stockpile resources\n");
-    printf("- Always keep reserve gold for emergencies\n");
-    printf("- Sell outdated equipment rather than hoarding\n\n");
+    printf("GOLD MANAGEMENT:\n");
+    printf("ESSENTIAL PURCHASES: Potions, basic weapon upgrades\n");
+    printf("STRATEGIC SAVING: Save for high-tier crafted weapons\n");
+    printf("EMERGENCY FUND: Keep reserve for merchant encounters\n");
+    printf("INVESTMENT: Better weapons = easier gold farming\n\n");
     
-    printf("INCOME SOURCES:\n");
-    printf("- Defeating enemies (scales with level/depth)\n");
-    printf("- Treasure chests and random finds\n");
-    printf("- Quest completion rewards\n");
-    printf("- Selling unused equipment\n");
-    printf("- Random events (both positive and negative)\n\n");
-    
-    printf("WEALTH MANAGEMENT:\n");
-    printf("- Don't spend all gold at once\n");
-    printf("- Balance between immediate needs and saving for big purchases\n");
-    printf("- Some expensive items provide long-term value\n");
-    printf("- Emergency funds can save your life in deep caves\n\n");
+    printf("CRAFTING VS BUYING:\n");
+    printf("CRAFTING: Guaranteed stats, fixed prices\n");
+    printf("BUYING: Random stats, variable prices\n");
+    printf("RECOMMENDATION: Craft for specific needs, buy for upgrades\n\n");
     
     printf("Press any key to continue...\n");
     _getch();
     
-    // SECTION 10: RANDOM GENERATION SYSTEMS
+    // SECTION 10: MULTI-DIMENSIONAL REALMS
     clearScreen();
-    printHeader("10. RANDOM GENERATION SYSTEMS - EVER-CHANGING WORLD");
+    printHeader("10. MULTI-DIMENSIONAL REALMS - BEYOND THE CAVES");
     
-    printf("PROCEDURAL CONTENT GENERATION:\n");
-    printf("Every playthrough is unique! The game features extensive\n");
-    printf("random generation across multiple systems for endless replayability.\n\n");
+    printf("REALM UNLOCKING SYSTEM:\n");
+    printf("FIRE REALM: Unlocks at Level 5\n");
+    printf("   - Volcanic landscape with fire-based enemies\n");
+    printf("   - Enemies: Lower health but higher attack\n");
+    printf("   - Rewards: 120%% Gold, 120%% Experience\n");
+    printf("   - Special: Fire weapons with burning effects\n\n");
     
-    printf("RANDOM CAVE GENERATION:\n");
-    printf("Each cave level is procedurally generated when you enter:\n");
-    printf("- Room layouts are completely random every time\n");
-    printf("- Enemy placements, treasure locations, and special rooms shuffle\n");
-    printf("- Stairs/exits appear in different positions each run\n");
-    printf("- Room descriptions and events are randomly assigned\n");
-    printf("- Even revisiting the same depth level creates new layouts\n\n");
+    printf("ICE REALM: Unlocks at Level 8\n");
+    printf("   - Frozen tundra with ice creatures\n");
+    printf("   - Enemies: Higher health, slower but tough\n");
+    printf("   - Rewards: 110%% Gold, 110%% Experience\n");
+    printf("   - Special: Ice weapons that can slow enemies\n\n");
     
-    printf("WEAPON GENERATION SYSTEM:\n");
-    printf("Weapons are randomly created with unique properties:\n");
-    printf("NAME GENERATION: Combines random prefixes and suffixes\n");
-    printf("   Examples: 'Iron Sword', 'Shadow Dagger', 'Crystal Axe'\n");
-    printf("   Over 100 possible name combinations\n\n");
+    printf("SHADOW REALM: Unlocks after reaching Cave Depth 3\n");
+    printf("   - Dark dimension focused on stealth\n");
+    printf("   - Enemies: Balanced with high critical chance\n");
+    printf("   - Rewards: 150%% Gold, 130%% Experience\n");
+    printf("   - Special: Shadow weapons with high criticals\n\n");
     
-    printf("STAT GENERATION: Random within level-appropriate ranges\n");
-    printf("   Attack: 5-15 base + scaling with player level\n");
-    printf("   Durability: 10-100 points\n");
-    printf("   Value: Based on attack power with random modifier\n");
-    printf("   Level Requirement: 1-5 randomly assigned\n\n");
+    printf("REALM STRUCTURE:\n");
+    printf("- 4x4 grid (smaller but more dangerous than caves)\n");
+    printf("- Guaranteed boss in each realm\n");
+    printf("- Higher enemy density (60%% vs 40%% in caves)\n");
+    printf("- More treasure rooms (40%% vs 30%% in caves)\n");
+    printf("- Permanent stat boosts from realm artifacts\n\n");
     
-    printf("RARITY SYSTEM (Implied):\n");
-    printf("Common: Basic stats, simple names\n");
-    printf("Unusual: Better stats, unique name combinations\n");
-    printf("Rare: High stats, special properties in deeper caves\n");
-    printf("Legendary: Boss drops and deepest cave rewards\n\n");
+    printf("REALM BOSS REWARDS:\n");
+    printf("FIRE REALM BOSS: +3 Permanent Attack\n");
+    printf("ICE REALM BOSS: +20 Permanent Max Health\n");
+    printf("SHADOW REALM BOSS: +4 Permanent Defense\n");
+    printf("All bosses drop legendary realm weapons!\n\n");
     
-    printf("ENEMY GENERATION:\n");
-    printf("Enemies are dynamically created based on multiple factors:\n");
-    printf("BASE TYPES: Goblin, Orc, Skeleton, Spider, Bandit, Cave Troll, etc.\n");
-    printf("   - 7+ base enemy types with different stat distributions\n\n");
-    
-    printf("SCALING MECHANICS:\n");
-    printf("Level Scaling: Enemies match player level ± random variation\n");
-    printf("Depth Scaling: +8 health, +3 attack, +2 defense per cave level\n");
-    printf("Random Variation: ±10-20%% stats for uniqueness\n");
-    printf("Elite Chance: 5%% chance for 'Champion' enemies with 2× stats\n\n");
-    
-    printf("ENEMY ATTRIBUTES:\n");
-    printf("Health: 15-50 + (level × 2) + (depth × 8)\n");
-    printf("Attack: 5-18 + level + (depth × 3)\n");
-    printf("Defense: 2-10 + (level/2) + (depth × 2)\n");
-    printf("Rewards: Experience and gold scale with difficulty\n\n");
-    
-    printf("BOSS GENERATION SYSTEM:\n");
-    printf("BOSS TYPES BY DEPTH LEVEL:\n");
-    printf("Level 1: Cave Troll Chieftain - Balanced stats\n");
-    printf("Level 2: Stone Golem Guardian - High defense\n");
-    printf("Level 3: Undead Dragon - High attack, special abilities\n");
-    printf("Level 4: Shadow Lich - Magical, mana-draining attacks\n");
-    printf("Level 5: Molten Core Titan - Ultimate challenge\n\n");
-    
-    printf("BOSS STAT SCALING:\n");
-    printf("Health: 120 + (player level × 10) + (depth × 30)\n");
-    printf("Attack: 25 + (player level × 2) + (depth × 5)\n");
-    printf("Defense: 12 + player level + (depth × 3)\n");
-    printf("Rewards: 200-500 exp, 300-800 gold based on depth\n\n");
-    
-    printf("RANDOM EVENT SYSTEM:\n");
-    printf("15%% chance to trigger random events during exploration:\n");
-    printf("MYSTERIOUS STRANGER (20%%): Gifts 2 health potions\n");
-    printf("AMBUSH! (20%%): Bandits steal 25%% of your gold\n");
-    printf("LUCKY FIND (20%%): Find 50 + (level × 10) gold\n");
-    printf("MYSTERIOUS FOUNTAIN (20%%): Fully restore health and mana\n");
-    printf("TRAVELING MERCHANT (20%%): Opportunity to buy magic scrolls\n\n");
-    
-    printf("TREASURE GENERATION:\n");
-    printf("Four types of treasure with random rewards:\n");
-    printf("GOLD HOARD (25%%): 30-80 + (level × 15) + (depth × 5) gold\n");
-    printf("WEAPON CACHE (25%%): Random weapon + level + depth bonuses\n");
-    printf("POTION SATCHEL (25%%): 1-3 + (depth/2) health potions\n");
-    printf("MAGIC ARTIFACT (25%%): +10 + depth max mana, +25 exp\n\n");
-    
-    printf("MERCHANT INVENTORY GENERATION:\n");
-    printf("Wandering merchants offer randomly generated items:\n");
-    printf("- Weapons scaled to current depth level\n");
-    printf("- Prices: 70-180 + (level × 12) + (depth × 20)\n");
-    printf("- Inventory refreshes each encounter\n");
-    printf("- Better deals in deeper, more dangerous areas\n\n");
-    
-    printf("NPC DIALOGUE & INTERACTIONS:\n");
-    printf("NPCs offer random dialogue from multiple options:\n");
-    printf("- 3-5 different dialogue lines per NPC\n");
-    printf("- Random selection each interaction\n");
-    printf("- Some provide hints about cave layout or dangers\n");
-    printf("- Random gifts: healing, mana restoration, or gold\n\n");
-    
-    printf("RESTING AMBUSH MECHANICS:\n");
-    printf("Resting in caves risks random ambushes:\n");
-    printf("Base Chance: 30%% + (5%% × depth level)\n");
-    printf("Level 1: 35%% chance    Level 3: 45%% chance\n");
-    printf("Level 5: 55%% chance - nearly guaranteed at max depth!\n");
-    printf("Ambush enemies are standard random encounters\n\n");
-    
-    printf("RANDOM NUMBER GENERATION (RNG) EXPLAINED:\n");
-    printf("The game uses sophisticated RNG for fairness:\n");
-    printf("- Seeded with system time for true randomness\n");
-    printf("- Balanced ranges prevent extreme outcomes\n");
-    printf("- Multiple factors ensure appropriate challenge\n");
-    printf("- No two playthroughs are ever identical\n\n");
-    
-    printf("STRATEGIES FOR RANDOM SYSTEMS:\n");
-    printf("EMBRACE VARIETY: Each run teaches different skills\n");
-    printf("ADAPT QUICKLY: Assess new situations and adjust tactics\n");
-    printf("DON'T RELY ON PATTERNS: Enemy placements change each time\n");
-    printf("EXPERIMENT: Try different approaches with random equipment\n");
-    printf("LEARN FROM FAILURE: Each death teaches about new combinations\n\n");
-    
-    printf("RANDOM GENERATION BENEFITS:\n");
-    printf("∞ REPLAYABILITY: No two adventures are the same\n");
-    printf("SKILL DEVELOPMENT: Learn to adapt rather than memorize\n");
-    printf("SURPRISE FACTOR: Constant discovery and novelty\n");
-    printf("PERSONAL STORIES: Unique experiences to share\n");
-    printf("LONG-TERM ENGAGEMENT: Always something new to discover\n\n");
+    printf("REALM STRATEGIES:\n");
+    printf("FIRE REALM: Use hit-and-run tactics, avoid prolonged fights\n");
+    printf("ICE REALM: Prepare for endurance battles, bring extra healing\n");
+    printf("SHADOW REALM: Focus on critical hits, use defensive skills\n");
+    printf("GENERAL: Realms are high-risk, high-reward - don't enter unprepared!\n\n");
     
     printf("Press any key to continue...\n");
     _getch();
     
-    // SECTION 11: ADVANCED STRATEGIES
+    // SECTION 11: RANDOM GENERATION SYSTEMS
     clearScreen();
-    printHeader("11. ADVANCED TIPS & STRATEGIES - MASTERING RANDOMNESS");
+    printHeader("11. RANDOM GENERATION - ENDLESS VARIETY");
     
-    printf("ADAPTING TO RANDOM CONTENT:\n");
-    printf("FLEXIBLE COMBAT: Don't rely on specific enemy patterns\n");
-    printf("   - Learn to assess enemy strengths quickly\n");
-    printf("   - Develop general tactics that work against any foe\n");
-    printf("   - Keep versatile equipment for different situations\n\n");
+    printf("PROCEDURAL CONTENT:\n");
+    printf("WEAPONS: Random names, stats, and properties\n");
+    printf("CAVE LAYOUTS: Unique room arrangements each visit\n");
+    printf("ENEMY STATS: Scaled to player level and location\n");
+    printf("TREASURE CONTENTS: Various gold amounts and item types\n");
+    printf("RANDOM EVENTS: Unexpected encounters during exploration\n\n");
     
-    printf("EXPLORATION WITH UNCERTAINTY:\n");
-    printf("   - Assume every cave layout is unknown\n");
-    printf("   - Develop systematic search patterns\n");
-    printf("   - Always have contingency plans for surprises\n");
-    printf("   - Mental mapping skills become crucial\n\n");
+    printf("RANDOM EVENT TYPES:\n");
+    printf("MYSTERIOUS STRANGER: Free potions and helpful items\n");
+    printf("AMBUSH: Gold theft by bandits (lose 25%% of gold)\n");
+    printf("LUCKY FIND: Discover hidden treasure caches\n");
+    printf("MYSTERIOUS FOUNTAIN: Full health and mana restoration\n");
+    printf("TRAVELING MERCHANT: Special item offers\n\n");
     
-    printf("EQUIPMENT STRATEGY FOR RANDOM LOOT:\n");
-    printf("DON'T GET ATTACHED: Weapons come and go randomly\n");
-    printf("BACKUP PLANS: Always carry spare weapons\n");
-    printf("QUICK ASSESSMENT: Learn to evaluate weapon worth rapidly\n");
-    printf("OPPORTUNISTIC UPGRADES: Grab good random finds when they appear\n\n");
+    printf("REPLAY VALUE:\n");
+    printf("- Different cave layouts each playthrough\n");
+    printf("- Random weapon generation encourages collection\n");
+    printf("- Various enemy combinations keep combat fresh\n");
+    printf("- Multiple realm strategies to experiment with\n");
+    printf("- Different quest completion paths available\n\n");
     
-    printf("RISK MANAGEMENT IN RANDOM ENVIRONMENTS:\n");
-    printf("CONSERVATIVE STARTS: Be cautious until you understand the run\n");
-    printf("ESCALATING COMMITMENT: Increase risks as you learn the layout\n");
-    printf("- Know when to cut losses on a bad layout\n");
-    printf("EMERGENCY RESERVES: Always keep escape resources\n\n");
+    printf("RANDOMIZATION STRATEGIES:\n");
+    printf("- Embrace variety - no two playthroughs are identical\n");
+    printf("- Adapt to the weapons and enemies you encounter\n");
+    printf("- Use random events to your advantage when possible\n");
+    printf("- Save before major decisions due to random outcomes\n\n");
     
-    printf("LEARNING FROM RANDOMNESS:\n");
-    printf("PATTERN RECOGNITION: Learn general patterns, not specifics\n");
-    printf("   - Enemy behavior tendencies across types\n");
-    printf("   - Room connection probabilities\n");
-    printf("   - Treasure distribution patterns\n");
-    printf("   - Merchant pricing trends\n\n");
+    printf("Press any key to continue...\n");
+    _getch();
     
-    printf("RANDOM-SPECIFIC SKILLS TO DEVELOP:\n");
-    printf("QUICK DECISION MAKING: Assess situations rapidly\n");
-    printf("RESOURCE MANAGEMENT: Adapt to random income/expenses\n");
-    printf("- Improvisation: Make the most of random equipment\n");
-    printf("RESILIENCE: Recover from unexpected setbacks\n");
-    printf("- Pattern detection in apparent chaos\n\n");
+    // SECTION 12: ADVANCED TIPS & STRATEGIES
+    clearScreen();
+    printHeader("12. ADVANCED TIPS & STRATEGIES");
     
-    printf("PLAYSTYLES FOR RANDOM WORLDS:\n");
-    printf("CAUTIOUS EXPLORER: Methodical, risk-averse, thorough\n");
-    printf("- Benefits: Fewer deaths, consistent progress\n");
-    printf("- Drawbacks: Slower advancement, may miss opportunities\n\n");
+    printf("EARLY GAME (Levels 1-3):\n");
+    printf("- Focus on forest exploration for safe experience\n");
+    printf("- Complete Monster Hunter quest first for quick gold\n");
+    printf("- Save gold for weapon upgrades rather than potions\n");
+    printf("- Visit caves cautiously - don't go too deep early\n");
+    printf("- Unlock Warrior Strength or Rogue Agility first\n\n");
     
-    printf("BOLD ADVENTURER: Aggressive, risk-taking, adaptive\n");
-    printf("- Benefits: Rapid advancement, big rewards\n");
-    printf("- Drawbacks: More deaths, inconsistent progress\n\n");
+    printf("MID GAME (Levels 4-7):\n");
+    printf("- Start exploring cave depth levels 2-3\n");
+    printf("- Complete cave exploration and depth quests\n");
+    printf("- Invest in Critical Strike skill for damage boost\n");
+    printf("- Use crafting for reliable weapon upgrades\n");
+    printf("- Begin realm exploration when unlocked\n\n");
     
-    printf("BALANCED STRATEGIST: Mixes caution and opportunism\n");
-    printf("- Benefits: Steady progress with occasional big wins\n");
-    printf("- Drawbacks: Requires good judgment and experience\n\n");
+    printf("END GAME (Levels 8+):\n");
+    printf("- Challenge the deepest cave levels and final boss\n");
+    printf("- Master all three realms for permanent stat boosts\n");
+    printf("- Complete all available quests for achievements\n");
+    printf("- Experiment with different skill builds\n");
+    printf("- Collect legendary weapons from all content\n\n");
     
-    printf("PROGRESSION PACING:\n");
-    printf("LEVELS 1-2: Learn mechanics, basic forest exploration\n");
-    printf("LEVELS 3-4: Begin cave diving, skill selection\n");
-    printf("LEVELS 5-6: Master combat, tackle deeper caves\n");
-    printf("LEVEL %d+: Ultimate challenges, min-max optimization\n", MAX_CAVE_DEPTH);
-    printf("- Each stage requires adapting strategies and equipment\n\n");
+    printf("GENERAL ADVANCED TIPS:\n");
+    printf("- Map awareness: Always know your position in caves\n");
+    printf("- Resource management: Save consumables for emergencies\n");
+    printf("- Risk assessment: Know when to retreat and regroup\n");
+    printf("- Build synergy: Choose skills that complement each other\n");
+    printf("- Exploration efficiency: Plan routes to minimize backtracking\n");
+    printf("- Save frequently: Use multiple slots for important decisions\n\n");
     
-    printf("ENDGAME GOALS:\n");
-    printf("- Reach the deepest cave level (%d)\n", MAX_CAVE_DEPTH);
-    printf("- Complete all available quests\n");
-    printf("- Obtain legendary equipment\n");
-    printf("- Maximize character level and skills\n");
-    printf("- Achieve 100%% map exploration\n");
-    printf("- Challenge yourself with speed runs or special conditions\n\n");
+    printf("BOSS STRATEGIES:\n");
+    printf("- Always enter boss fights at full health and mana\n");
+    printf("- Use defensive stance when low on health\n");
+    printf("- Save special attacks for when boss is near defeat\n");
+    printf("- Have escape plan if fight goes badly\n");
+    printf("- Learn boss patterns and attack windows\n\n");
     
-    printf("RANDOM GENERATION PHILOSOPHY:\n");
-    printf("The unknown is not your enemy - it's your teacher.\n");
-    printf("Every random element is an opportunity to learn and adapt.\n");
-    printf("The greatest adventurers aren't those who memorize paths,\n");
-    printf("but those who can find their way through any wilderness.\n");
-    printf("Embrace the chaos - it's where the best stories are born!\n\n");
+    printf("FINAL WORDS OF WISDOM:\n");
+    printf("The greatest adventurers are not those who never fail,\n");
+    printf("but those who learn from each defeat and return stronger.\n");
+    printf("Every cave holds secrets, every realm holds power,\n");
+    printf("and your legend is waiting to be written.\n\n");
     
-    printf("FINAL WISDOM FOR RANDOM WORLDS:\n");
-    printf("1. Expect the unexpected - and learn to enjoy it\n");
-    printf("2. Every failure teaches something new\n");
-    printf("3. Your ability to adapt is your greatest weapon\n");
-    printf("4. The same strategy won't work every time - and that's good!\n");
-    printf("5. The most memorable adventures come from overcoming\n");
-    printf("   challenges you never could have predicted\n\n");
-    
-    printf("Now go forth, adventurer! Your randomly generated destiny awaits!\n");
+    printf("Now go forth, adventurer! Your multi-dimensional destiny awaits!\n");
     printf("May your reflexes be quick and your adaptability endless!\n\n");
     
     printf("Press any key to return to the main menu...\n");
@@ -3090,6 +4140,7 @@ void splashStart() {
     typewrite("+=============================================================+\n", 10);
     typewrite("|                                                             |\n", 10);
     typewrite("|                   CAVES & CATASTROPHES                      |\n", 10);
+    typewrite("|                The Legend of Bad Decisions                  |\n", 10);
     typewrite("|                                                             |\n", 10);
     typewrite("+=============================================================+\n", 10);
     printf("\n\n");
