@@ -271,7 +271,7 @@ Quick map — search for these functions:
 
 ## Extending & refactor suggestions
 
-- Break code into more modules (UI, save, ai, generation).  
+- Break code into more modules (UI, save, generation).  
 - Migrate saves to JSON/text for portability.  
 - Replace `_getch()` with `ncurses` on POSIX for a richer terminal UI.  
 - Add `ENABLE_WEBHOOK` compile flag for opt‑in telemetry.  
