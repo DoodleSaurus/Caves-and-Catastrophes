@@ -290,7 +290,7 @@ Quick map — search for these functions:
 
 ## License & credits
 
-- Author / Maintainer: Carl Harvey Miguel (DoodleSaurus)  
+- Developed by: Carl Harvey Miguel (DoodleSaurus)  
 - License: Creative Commons Attribution‑NoDerivatives 4.0 International (CC BY‑ND 4.0) — see `LICENSE`.
 
 ---
