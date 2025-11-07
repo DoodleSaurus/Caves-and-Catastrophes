@@ -528,7 +528,7 @@ void handleRoomEvent(player *p, inventory *inv, cave_room *room, quest *quests, 
     } else if (room->is_stairs_up) {
         printBox("STAIRS ASCENDING");
         printf("Stairs lead back up to the previous level.\n");
-        printf("Use 'K' to ascend when you need to retreat.\n");
+        printf("Use 'U' to ascend when you need to retreat.\n");
         
     } else if (room->is_exit) {
         printBox("FINAL EXIT PORTAL");
