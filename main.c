@@ -1741,12 +1741,12 @@ void handleRoomEvent(player *p, inventory *inv, cave_room *room, quest *quests, 
     } else if (room->is_stairs_down) {
         printBox("STAIRS DESCENDING");
         printf("A steep staircase leads deeper into the earth.\n");
-        printf("Use Arrow Down (Ctrl + X) to descend to the next level when you're ready.\n");
+        printf("Use 'J' to descend to the next level when you're ready.\n");
         
     } else if (room->is_stairs_up) {
         printBox("STAIRS ASCENDING");
         printf("Stairs lead back up to the previous level.\n");
-        printf("Use Arrow Up (Ctrl + Y) to ascend when you need to retreat.\n");
+        printf("Use 'K' to ascend when you need to retreat.\n");
         
     } else if (room->is_exit) {
         printBox("FINAL EXIT PORTAL");
