@@ -149,8 +149,7 @@ NPC / Prompts
 - `y` / `Y` Yes / Accept  
 - `n` / `N` No / Decline
 
-Notes
-- Ctrl+X / Ctrl+Y appear in historical comments (control codes 24/25). Do not rely on them — use `J`/`U`.  
+Notes  
 - Many inputs use `_getch()`; POSIX needs the `_getch()` shim to get identical single-key behavior.
 
 ---
