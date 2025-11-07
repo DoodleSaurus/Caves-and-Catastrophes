@@ -99,7 +99,7 @@ Cave navigation
 - `A` / `a` West  
 - `D` / `d` East  
 - `J` / `j` Descend stairs (when present)  
-- `U` / `u` Ascend stairs (when present) — note: some messages mention `K`; implemented key is `U`  
+- `U` / `u` Ascend stairs (when present)  
 - `M` / `m` Show map  
 - `I` / `i` Inventory  
 - `R` / `r` Rest (heal but risk ambush)  
