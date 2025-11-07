@@ -2,6 +2,8 @@
 
 A compact, keyboard-driven roguelike written in C. Explore procedurally generated forests, multi-level caves and multi-dimensional realms. Fight monsters and bosses, collect loot, craft weapons, complete quests and level up.
 
+This project began because I was bored during programming class — a blank file, a cup of coffee and some RNG experiments turned into this little chaotic adventure.
+
 This README explains the repository layout, build/run steps (Windows & POSIX), the complete control reference, developer notes, and privacy/telemetry guidance.
 
 ---
