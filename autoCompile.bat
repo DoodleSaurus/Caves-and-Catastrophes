@@ -50,7 +50,6 @@ if exist "main\realm.c" set SOURCE_FILES=%SOURCE_FILES% main\realm.c
 if exist "main\utils.c" set SOURCE_FILES=%SOURCE_FILES% main\utils.c
 if exist "main\cave.c" set SOURCE_FILES=%SOURCE_FILES% main\cave.c
 if exist "main\combat.c" set SOURCE_FILES=%SOURCE_FILES% main\combat.c
-if exist "main\webhook.c" set SOURCE_FILES=%SOURCE_FILES% main\webhook.c
 
 if "%SOURCE_FILES%"=="" (
     echo No additional source files found in main\ - compiling single-file project.
